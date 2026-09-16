@@ -1,0 +1,33 @@
+# --- Secretos / entorno local ----------------------------------------------
+# .env lleva las contraseñas de MySQL: NUNCA debe subirse.
+# La plantilla .env.example si se versiona.
+.env
+.env.*
+!.env.example
+*.env.local
+
+# --- .NET -------------------------------------------------------------------
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.userosscache
+.vs/
+
+# --- Node / frontend --------------------------------------------------------
+node_modules/
+dist/
+build/
+npm-debug.log*
+yarn-error.log*
+
+# --- Herramientas y editores ------------------------------------------------
+.vscode/
+.idea/
+*.log
+
+# --- Windows / OneDrive -----------------------------------------------------
+Thumbs.db
+desktop.ini

@@ -1,0 +1,95 @@
+name: colorsin
+
+services:
+  # ---------------------------------------------------------------------------
+  # Base de datos MySQL 8.4 (LTS)
+  # ---------------------------------------------------------------------------
+  mysql:
+    image: mysql:8.4
+    container_name: colorsin_mysql
+    restart: unless-stopped
+
+    # Parámetros del servidor. Van aquí y NO en un archivo .cnf montado porque
+    # los bind mounts de Windows llegan con permisos 0777 y MySQL ignora por
+    # seguridad todo archivo de configuración escribible por todos
+    # ("World-writable config file ... is ignored").
+    command:
+      # Juego de caracteres: tildes, ñ y emojis.
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      # Hora de Colombia (UTC-5).
+      - --default-time-zone=-05:00
+      # Conexiones y rendimiento para desarrollo local.
+      - --max-connections=150
+      - --innodb-buffer-pool-size=512M
+      - --innodb-flush-log-at-trx-commit=2
+      # Registra consultas de más de 1 segundo: útil para afinar el inventario.
+      - --slow-query-log=1
+      - --long-query-time=1
+
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      TZ: America/Bogota
+
+    ports:
+      # host:contenedor -> te conectas desde Windows a localhost:3307
+      # (3307 en el host para no chocar con un MySQL instalado localmente)
+      - "3307:3306"
+
+    volumes:
+      # Volumen persistente: los datos sobreviven a `docker compose down`.
+      - mysql_data:/var/lib/mysql
+      # Scripts que corren UNA sola vez, cuando el volumen está vacío.
+      - ./infra/mysql/init:/docker-entrypoint-initdb.d:ro
+
+    healthcheck:
+      # Doble verificación: el servidor responde Y la base + usuario de app existen.
+      # El doble signo `$$` evita que Compose interpole la variable: la expande
+      # el shell DENTRO del contenedor, así la clave nunca queda en el YAML.
+      test:
+        - CMD-SHELL
+        - >-
+          mysqladmin ping -h 127.0.0.1 -u root -p"$$MYSQL_ROOT_PASSWORD" --silent
+          && mysql -h 127.0.0.1 -u "$$MYSQL_USER" -p"$$MYSQL_PASSWORD"
+          -D "$$MYSQL_DATABASE" -e "SELECT 1" > /dev/null 2>&1
+      interval: 10s        # cada cuánto se repite la prueba
+      timeout: 5s          # cuánto espera cada intento
+      retries: 10          # fallos seguidos antes de marcarlo "unhealthy"
+      start_period: 40s    # margen inicial: el primer arranque crea la BD
+
+    networks:
+      - colorsin_net
+
+  # ---------------------------------------------------------------------------
+  # API .NET — descomenta cuando exista el proyecto y su Dockerfile.
+  # `condition: service_healthy` es lo que hace que la API NO arranque hasta que
+  # el healthcheck de arriba esté en verde.
+  # ---------------------------------------------------------------------------
+  # api:
+  #   build:
+  #     context: .
+  #     dockerfile: src/Colorsin.Api/Dockerfile
+  #   container_name: colorsin_api
+  #   restart: unless-stopped
+  #   depends_on:
+  #     mysql:
+  #       condition: service_healthy
+  #   environment:
+  #     ASPNETCORE_ENVIRONMENT: Development
+  #     ConnectionStrings__Default: "Server=mysql;Port=3306;Database=${MYSQL_DATABASE};User Id=${MYSQL_USER};Password=${MYSQL_PASSWORD};TreatTinyAsBoolean=false;"
+  #   ports:
+  #     - "5080:8080"
+  #   networks:
+  #     - colorsin_net
+
+volumes:
+  mysql_data:
+    name: colorsin_mysql_data
+
+networks:
+  colorsin_net:
+    name: colorsin_net
+    driver: bridge
