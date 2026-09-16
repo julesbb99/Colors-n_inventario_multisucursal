@@ -1,0 +1,6 @@
+@colorsin.Api_HostAddress = http://localhost:5121
+
+GET {{colorsin.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
