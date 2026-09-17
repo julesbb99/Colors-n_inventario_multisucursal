@@ -1,5 +1,9 @@
+using Colorsin.Application.Comun.Auditoria;
 using Colorsin.Application.Comun.Repositories;
 using Colorsin.Application.Comun.Services;
+using Colorsin.Application.Inventario.Repositories;
+using Colorsin.Application.Inventario.Services;
+using Colorsin.Infrastructure.Auditoria;
 using Colorsin.Infrastructure.Persistence;
 using Colorsin.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -76,6 +80,22 @@ builder.Services.AddScoped<IUnidadMedidaRepository, UnidadMedidaRepository>();
 builder.Services.AddScoped<ISucursalService, SucursalService>();
 builder.Services.AddScoped<IUsuarioService, UsuarioService>();
 builder.Services.AddScoped<IUnidadMedidaService, UnidadMedidaService>();
+
+// -----------------------------------------------------------------------------
+// Auditoria: transversal a todos los modulos.
+//
+// Scoped y no Singleton por una razon de correccion, no de estilo: comparte el
+// AppDbContext de la peticion con quien la llama, y es eso lo que hace que el
+// evento se confirme en la MISMA transaccion que el cambio auditado.
+// -----------------------------------------------------------------------------
+builder.Services.AddScoped<IAuditoriaService, AuditoriaService>();
+
+// -----------------------------------------------------------------------------
+// Modulo Inventario: productos, existencias, lotes y libro mayor.
+// -----------------------------------------------------------------------------
+builder.Services.AddScoped<IProductoRepository, ProductoRepository>();
+builder.Services.AddScoped<IInventarioRepository, InventarioRepository>();
+builder.Services.AddScoped<IInventarioService, InventarioService>();
 
 var app = builder.Build();
 

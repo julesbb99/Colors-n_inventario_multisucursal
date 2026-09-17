@@ -31,6 +31,16 @@ public class MovimientoInventario
     /// <summary>La misma cantidad convertida a la unidad base del producto.</summary>
     public decimal? CantidadBase { get; set; }
 
+    /// <summary>
+    /// Lote afectado, cuando el movimiento se imputa a uno concreto.
+    /// Nulo en movimientos que no discriminan lote (un ajuste global, por
+    /// ejemplo). Es lo que permite la trazabilidad FEFO de punta a punta.
+    /// </summary>
+    public int? LoteId { get; set; }
+
+    /// <summary>Nota del operario sobre el movimiento.</summary>
+    public string? Observaciones { get; set; }
+
     public DateTime? Fecha { get; set; }
 
     // --- Navegacion ---
@@ -38,4 +48,5 @@ public class MovimientoInventario
     public Producto Producto { get; set; } = null!;
     public Usuario Usuario { get; set; } = null!;
     public UnidadMedida Unidad { get; set; } = null!;
+    public Lote? Lote { get; set; }
 }

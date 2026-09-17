@@ -24,6 +24,7 @@ public class AppDbContext : DbContext
     // --- Comun ---
     public DbSet<Sucursal> Sucursales => Set<Sucursal>();
     public DbSet<Usuario> Usuarios => Set<Usuario>();
+    public DbSet<EventoAuditoria> EventosAuditoria => Set<EventoAuditoria>();
 
     // --- Inventario ---
     public DbSet<UnidadMedida> UnidadesMedida => Set<UnidadMedida>();
@@ -152,6 +153,38 @@ public class AppDbContext : DbContext
              .HasConstraintName("fk_usuarios_sucursal")
              .OnDelete(DeleteBehavior.SetNull);
         });
+
+        modelBuilder.Entity<EventoAuditoria>(e =>
+        {
+            e.ToTable("auditoria_eventos");
+            e.HasKey(x => x.Id);
+
+            e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
+            e.Property(x => x.Modulo).HasColumnName("modulo").HasMaxLength(50).IsRequired();
+            e.Property(x => x.Accion).HasColumnName("accion").HasMaxLength(80).IsRequired();
+            e.Property(x => x.UsuarioId).HasColumnName("usuario_id").IsRequired();
+            e.Property(x => x.Detalle).HasColumnName("detalle").HasMaxLength(1000);
+
+            // ValueGeneratedOnAdd para que EF omita la columna en el INSERT y la
+            // llene CURRENT_TIMESTAMP. Sin eso mandaria el valor por defecto de
+            // DateTime (0001-01-01), que MySQL rechaza.
+            e.Property(x => x.Fecha).HasColumnName("fecha")
+             .HasColumnType("datetime")
+             .HasDefaultValueSql("CURRENT_TIMESTAMP")
+             .ValueGeneratedOnAdd();
+
+            // Consulta tipica: que paso en tal modulo entre tales fechas.
+            e.HasIndex(x => new { x.Modulo, x.Fecha }).HasDatabaseName("idx_auditoria_modulo_fecha");
+            e.HasIndex(x => x.UsuarioId).HasDatabaseName("idx_auditoria_usuario");
+
+            // Restrict, como el resto de la auditoria: borrar un usuario no
+            // puede llevarse por delante el rastro de lo que hizo.
+            e.HasOne(x => x.Usuario)
+             .WithMany()
+             .HasForeignKey(x => x.UsuarioId)
+             .HasConstraintName("fk_auditoria_usuario")
+             .OnDelete(DeleteBehavior.Restrict);
+        });
     }
 
     // =========================================================================
@@ -278,12 +311,20 @@ public class AppDbContext : DbContext
             e.Property(x => x.Cantidad).HasColumnName("cantidad").HasPrecision(14, 4);
             e.Property(x => x.UnidadId).HasColumnName("unidad_id").IsRequired();
             e.Property(x => x.CantidadBase).HasColumnName("cantidad_base").HasPrecision(14, 4);
+            e.Property(x => x.LoteId).HasColumnName("lote_id");
+            e.Property(x => x.Observaciones).HasColumnName("observaciones").HasMaxLength(255);
             e.Property(x => x.Fecha).HasColumnName("fecha")
-             .HasColumnType("datetime").HasDefaultValueSql("CURRENT_TIMESTAMP");
+             .HasColumnType("datetime").HasDefaultValueSql("CURRENT_TIMESTAMP")
+             .ValueGeneratedOnAdd();
 
             // Indice principal: reconstruir el saldo de un producto en una sede.
             e.HasIndex(x => new { x.SucursalId, x.ProductoId, x.Fecha })
              .HasDatabaseName("idx_movinv_sucursal_producto_fecha");
+
+            // Nombrado a mano: si no, EF lo llamaria
+            // IX_movimientos_inventario_lote_id y desentonaria con los idx_ del
+            // resto del esquema.
+            e.HasIndex(x => x.LoteId).HasDatabaseName("idx_movinv_lote");
 
             // Auditoria: TODAS las FK son Restrict. Nada debe poder borrar el
             // libro mayor en cascada.
@@ -309,6 +350,14 @@ public class AppDbContext : DbContext
              .WithMany(u => u.Movimientos)
              .HasForeignKey(x => x.UnidadId)
              .HasConstraintName("fk_movinv_unidad")
+             .OnDelete(DeleteBehavior.Restrict);
+
+            // Opcional: no todo movimiento se imputa a un lote. Sin coleccion
+            // inversa en Lote, que no hace falta para ninguna consulta actual.
+            e.HasOne(x => x.Lote)
+             .WithMany()
+             .HasForeignKey(x => x.LoteId)
+             .HasConstraintName("fk_movinv_lote")
              .OnDelete(DeleteBehavior.Restrict);
         });
     }
