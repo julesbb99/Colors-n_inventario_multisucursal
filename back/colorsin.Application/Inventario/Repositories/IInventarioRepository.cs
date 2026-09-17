@@ -70,6 +70,27 @@ public interface IInventarioRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Busca un lote por su numero dentro de una sede y un producto, bloqueando
+    /// la fila. Devuelve <c>null</c> si esa sede no tiene todavia ese lote.
+    ///
+    /// Lo usa la recepcion de compras para decidir entre sumar a un lote que ya
+    /// existe o crear uno nuevo.
+    ///
+    /// OJO: la tabla `lotes` NO tiene indice unico sobre
+    /// (producto_id, sucursal_id, numero_lote). Si llegaran a existir dos filas
+    /// con el mismo numero, este metodo devuelve una cualquiera. Ver la nota de
+    /// la implementacion.
+    /// </summary>
+    Task<Lote?> ObtenerLotePorNumeroParaActualizarAsync(
+        int sucursalId,
+        int productoId,
+        string numeroLote,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Crea un lote nuevo.</summary>
+    void AgregarLote(Lote lote);
+
+    /// <summary>
     /// Saldos en alerta: los que cumplen <c>cantidad_base &lt;= stock_minimo</c>.
     /// Filtra por sede si se indica.
     /// </summary>

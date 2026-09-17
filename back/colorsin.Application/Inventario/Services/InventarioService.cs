@@ -14,17 +14,6 @@ public sealed class InventarioService : IInventarioService
     /// <summary>Nombre del modulo en los eventos de auditoria.</summary>
     private const string Modulo = "Inventario";
 
-    /// <summary>
-    /// Decimales de `cantidad_base` en la base: DECIMAL(14,4).
-    ///
-    /// Se redondea en C# ANTES de guardar, a proposito. Si se dejara redondear
-    /// a MySQL, el saldo que este servicio calcula en memoria y el que queda
-    /// almacenado se separarian en el cuarto decimal, y ese descuadre se
-    /// acumularia movimiento tras movimiento hasta que el libro mayor dejara
-    /// de reconstruir el saldo.
-    /// </summary>
-    private const int DecimalesCantidadBase = 4;
-
     private readonly IInventarioRepository _inventario;
     private readonly IUnidadMedidaService _unidades;
     private readonly IProductoRepository _productos;
@@ -284,18 +273,12 @@ public sealed class InventarioService : IInventarioService
         ResultadoMovimiento? Resultado);
 
     /// <summary>
-    /// Pasa <paramref name="cantidad"/> de <paramref name="unidadId"/> a
-    /// <paramref name="unidadBaseId"/>.
+    /// Busca los factores de las dos unidades y delega la cuenta en
+    /// <see cref="ConversorUnidades"/>, que es donde vive la formula.
     ///
-    /// La formula NO es "multiplicar por el factor a litros". Eso solo funciona
-    /// si la unidad base del producto es el litro. El factor de cada unidad dice
-    /// cuantos litros vale una unidad suya, asi que para ir de una a otra hay
-    /// que pasar por litros en ambos sentidos:
-    ///
-    ///     cantidadBase = cantidad x factor(unidad) / factor(unidadBase)
-    ///
-    /// Con unidad base Litro (factor 1) se reduce al caso simple, pero si
-    /// manana un producto se lleva en galones la formula sigue valiendo.
+    /// Aqui solo queda lo que necesita la base de datos (buscar los factores) y
+    /// la traduccion del resultado a los codigos de error de este modulo.
+    /// Compras hace lo mismo con sus propios codigos, sobre la misma formula.
     /// </summary>
     private async Task<ResultadoConversion> ConvertirAUnidadBaseAsync(
         decimal cantidad,
@@ -303,16 +286,12 @@ public sealed class InventarioService : IInventarioService
         int unidadBaseId,
         CancellationToken cancellationToken)
     {
-        decimal cantidadBase;
+        decimal? factorUnidad = null;
+        decimal? factorUnidadBase = null;
 
-        if (unidadId == unidadBaseId)
-        {
-            // Misma unidad: no hay nada que convertir. Este atajo ademas permite
-            // mover productos en unidades sin factor a litros, como el
-            // kilogramo, mientras se registren en su propia unidad.
-            cantidadBase = cantidad;
-        }
-        else
+        // Si las unidades coinciden no hace falta consultar nada: el conversor
+        // devuelve la cantidad tal cual.
+        if (unidadId != unidadBaseId)
         {
             var origen = await _unidades.ObtenerFactorConversionLitrosAsync(unidadId, cancellationToken);
             if (!origen.UnidadExiste)
@@ -330,37 +309,31 @@ public sealed class InventarioService : IInventarioService
                     $"No existe la unidad base {unidadBaseId} que declara el producto."));
             }
 
-            // Un factor nulo significa que la unidad no es de volumen (el
-            // kilogramo). Entre una de peso y una de volumen no hay conversion
-            // posible sin conocer la densidad del producto, que el sistema no
-            // guarda: mejor rechazarlo que inventar un numero.
-            if (origen.FactorLitros is not > 0m || destino.FactorLitros is not > 0m)
-            {
-                return new ResultadoConversion(false, 0m, ResultadoMovimiento.Fallo(
+            factorUnidad = origen.FactorLitros;
+            factorUnidadBase = destino.FactorLitros;
+        }
+
+        var conversion = ConversorUnidades.ABaseDelProducto(
+            cantidad, unidadId, factorUnidad, unidadBaseId, factorUnidadBase);
+
+        return conversion.Estado switch
+        {
+            EstadoConversion.Ok =>
+                new ResultadoConversion(true, conversion.CantidadBase, null),
+
+            EstadoConversion.SinFactor =>
+                new ResultadoConversion(false, 0m, ResultadoMovimiento.Fallo(
                     ErrorMovimiento.ConversionImposible,
                     $"No hay conversion entre la unidad {unidadId} y la unidad base " +
-                    $"{unidadBaseId}: alguna de las dos no tiene factor a litros."));
-            }
+                    $"{unidadBaseId}: alguna de las dos no tiene factor a litros.")),
 
-            cantidadBase = cantidad * origen.FactorLitros.Value / destino.FactorLitros.Value;
-        }
-
-        // MySQL redondea DECIMAL al medio hacia arriba; se replica aqui para que
-        // el valor en memoria sea exactamente el que quedara almacenado.
-        cantidadBase = Math.Round(cantidadBase, DecimalesCantidadBase, MidpointRounding.AwayFromZero);
-
-        // El CHECK `chk_movinv_cantidad_base` exige > 0. Una cantidad tan
-        // pequena que se redondea a cero se rechaza aqui, con un mensaje util,
-        // en vez de dejar que MySQL responda con el error 3819.
-        if (cantidadBase <= 0m)
-        {
-            return new ResultadoConversion(false, 0m, ResultadoMovimiento.Fallo(
-                ErrorMovimiento.CantidadBaseCero,
-                $"Convertida a unidad base, la cantidad {Num(cantidad)} se redondea a cero " +
-                $"con {DecimalesCantidadBase} decimales. Registra una cantidad mayor."));
-        }
-
-        return new ResultadoConversion(true, cantidadBase, null);
+            _ =>
+                new ResultadoConversion(false, 0m, ResultadoMovimiento.Fallo(
+                    ErrorMovimiento.CantidadBaseCero,
+                    $"Convertida a unidad base, la cantidad {Num(cantidad)} se redondea a cero " +
+                    $"con {ConversorUnidades.DecimalesCantidadBase} decimales. " +
+                    "Registra una cantidad mayor."))
+        };
     }
 
     // =========================================================================

@@ -12,6 +12,17 @@ public class OrdenCompraDetalle
     /// <summary>Cantidad pedida, expresada en <see cref="UnidadId"/>.</summary>
     public decimal? Cantidad { get; set; }
 
+    /// <summary>
+    /// Cuanto se ha recibido de esta linea, acumulado entre todas las
+    /// recepciones. Va en <see cref="UnidadId"/>, la misma unidad que
+    /// <see cref="Cantidad"/>, para poder compararlas sin convertir.
+    ///
+    /// Arranca en cero y solo sube. Cuando iguala a <see cref="Cantidad"/> la
+    /// linea esta completa; mientras sea menor, la orden queda
+    /// ParcialmenteRecibida.
+    /// </summary>
+    public decimal CantidadRecibida { get; set; }
+
     /// <summary>Unidad de compra; puede diferir de la unidad base del producto.</summary>
     public int UnidadId { get; set; }
 

@@ -102,7 +102,12 @@ public class AppDbContext : DbContext
     private const string EnumRolUsuario = "enum('Administrador General','Gerente de Sucursal','Operador')";
     private const string EnumTipoPersona = "enum('Natural','Juridica')";
     private const string EnumTipoServicio = "enum('urgente','estandar')";
-    private const string EnumEstadoOrdenCompra = "enum('Pendiente','Confirmada','Recibida','Cancelada')";
+    // 'Confirmada' se retiro al entrar 'ParcialmenteRecibida'. Esta lista debe
+    // coincidir valor por valor con el enum EstadoOrdenCompra del dominio: si
+    // se separan, guardar un estado que falte aqui falla con el error 1265 de
+    // MySQL ("Data truncated for column 'estado'").
+    private const string EnumEstadoOrdenCompra =
+        "enum('Pendiente','ParcialmenteRecibida','Recibida','Cancelada')";
     private const string EnumEstadoTransferencia =
         "enum('Solicitada','EnPreparacion','EnTransito','RecibidaCompleta','RecibidaParcial')";
     private const string EnumUrgencia = "enum('Baja','Media','Alta')";
@@ -277,6 +282,19 @@ public class AppDbContext : DbContext
             e.HasIndex(x => x.FechaVencimiento).HasDatabaseName("idx_lotes_vencimiento");
             e.HasIndex(x => x.NumeroLote).HasDatabaseName("idx_lotes_numero");
 
+            // Un numero de lote del fabricante identifica UN lote dentro de una
+            // sede: si vuelve a llegar, se le suma cantidad, no se crea otra
+            // fila. Sin este indice la regla la aplicaba solo el codigo, y dos
+            // recepciones simultaneas del mismo lote no se ven entre si (ambas
+            // consultan antes de que la otra inserte) y terminan duplicando la
+            // fila, lo que rompe el orden FEFO y el cuadre por lote.
+            //
+            // El motor no tiene ese punto ciego: la segunda inserta y falla con
+            // el error 1062, y su transaccion se revierte entera.
+            e.HasIndex(x => new { x.ProductoId, x.SucursalId, x.NumeroLote })
+             .IsUnique()
+             .HasDatabaseName("ux_lotes_producto_sucursal_numero");
+
             e.HasOne(x => x.Producto)
              .WithMany(p => p.Lotes)
              .HasForeignKey(x => x.ProductoId)
@@ -417,14 +435,17 @@ public class AppDbContext : DbContext
             e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
             e.Property(x => x.ProveedorId).HasColumnName("proveedor_id").IsRequired();
             e.Property(x => x.SucursalId).HasColumnName("sucursal_id").IsRequired();
+            e.Property(x => x.UsuarioId).HasColumnName("usuario_id").IsRequired();
             e.Property(x => x.Fecha).HasColumnName("fecha")
-             .HasColumnType("datetime").HasDefaultValueSql("CURRENT_TIMESTAMP");
+             .HasColumnType("datetime").HasDefaultValueSql("CURRENT_TIMESTAMP")
+             .ValueGeneratedOnAdd();
             e.Property(x => x.Estado).HasColumnName("estado")
              .HasConversion<string>().HasColumnType(EnumEstadoOrdenCompra);
             e.Property(x => x.PlazoPagoDias).HasColumnName("plazo_pago_dias");
 
             e.HasIndex(x => new { x.SucursalId, x.Fecha }).HasDatabaseName("idx_oc_sucursal_fecha");
             e.HasIndex(x => x.Estado).HasDatabaseName("idx_oc_estado");
+            e.HasIndex(x => x.UsuarioId).HasDatabaseName("idx_oc_usuario");
 
             e.HasOne(x => x.Proveedor)
              .WithMany(p => p.OrdenesCompra)
@@ -437,6 +458,16 @@ public class AppDbContext : DbContext
              .HasForeignKey(x => x.SucursalId)
              .HasConstraintName("fk_oc_sucursal")
              .OnDelete(DeleteBehavior.Restrict);
+
+            // Restrict: un usuario con ordenes a su nombre no se puede borrar.
+            // Es el mismo criterio del libro mayor y de la auditoria; dejar
+            // huerfana una orden de compra borraria el rastro de quien la pidio.
+            // Sin coleccion inversa en Usuario: ninguna consulta la necesita.
+            e.HasOne(x => x.Usuario)
+             .WithMany()
+             .HasForeignKey(x => x.UsuarioId)
+             .HasConstraintName("fk_oc_usuario")
+             .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<OrdenCompraDetalle>(e =>
@@ -446,6 +477,15 @@ public class AppDbContext : DbContext
                 t.HasCheckConstraint("chk_ocd_cantidad", "`cantidad` IS NULL OR `cantidad` > 0");
                 t.HasCheckConstraint("chk_ocd_precio", "`precio_unitario` IS NULL OR `precio_unitario` >= 0");
                 t.HasCheckConstraint("chk_ocd_descuento", "`descuento` >= 0 AND `descuento` <= 100");
+
+                // La invariante de la recepcion parcial, impuesta por el motor:
+                // lo recibido nunca es negativo ni supera lo pedido. El servicio
+                // ya lo valida, pero eso solo cubre lo que pasa por el servicio;
+                // esto cubre tambien un UPDATE hecho a mano.
+                t.HasCheckConstraint(
+                    "chk_ocd_cantidad_recibida",
+                    "`cantidad_recibida` >= 0 AND " +
+                    "(`cantidad` IS NULL OR `cantidad_recibida` <= `cantidad`)");
             });
             e.HasKey(x => x.Id);
 
@@ -453,6 +493,16 @@ public class AppDbContext : DbContext
             e.Property(x => x.OrdenCompraId).HasColumnName("orden_compra_id").IsRequired();
             e.Property(x => x.ProductoId).HasColumnName("producto_id").IsRequired();
             e.Property(x => x.Cantidad).HasColumnName("cantidad").HasPrecision(14, 4);
+
+            // OJO: (12,4) frente a los (14,4) de `cantidad`. El tope de lo
+            // recibido queda en 99.999.999,9999 y el de lo pedido es cien veces
+            // mayor, asi que una linea por encima de ese tope no se podria
+            // completar. Con litros de pintura no se acerca ni de lejos, pero
+            // las dos columnas se comparan entre si y lo natural seria que
+            // tuvieran la misma escala.
+            e.Property(x => x.CantidadRecibida).HasColumnName("cantidad_recibida")
+             .HasPrecision(12, 4).HasDefaultValue(0m);
+
             e.Property(x => x.UnidadId).HasColumnName("unidad_id").IsRequired();
             e.Property(x => x.PrecioUnitario).HasColumnName("precio_unitario").HasPrecision(12, 2);
             e.Property(x => x.Descuento).HasColumnName("descuento").HasPrecision(5, 2).HasDefaultValue(0m);

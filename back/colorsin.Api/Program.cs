@@ -1,11 +1,14 @@
 using Colorsin.Application.Comun.Auditoria;
 using Colorsin.Application.Comun.Repositories;
 using Colorsin.Application.Comun.Services;
+using Colorsin.Application.Compras.Repositories;
+using Colorsin.Application.Compras.Services;
 using Colorsin.Application.Inventario.Repositories;
 using Colorsin.Application.Inventario.Services;
 using Colorsin.Infrastructure.Auditoria;
 using Colorsin.Infrastructure.Persistence;
 using Colorsin.Infrastructure.Persistence.Repositories;
+using Colorsin.Infrastructure.Persistence.Repositories.Compras;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -96,6 +99,17 @@ builder.Services.AddScoped<IAuditoriaService, AuditoriaService>();
 builder.Services.AddScoped<IProductoRepository, ProductoRepository>();
 builder.Services.AddScoped<IInventarioRepository, InventarioRepository>();
 builder.Services.AddScoped<IInventarioService, InventarioService>();
+
+// -----------------------------------------------------------------------------
+// Modulo Compras: proveedores y ordenes de compra.
+//
+// Scoped, como todo lo demas. Importa mas de lo que parece: ComprasService
+// escribe en inventario y en auditoria, y solo comparten transaccion porque
+// los tres comparten el AppDbContext de la peticion.
+// -----------------------------------------------------------------------------
+builder.Services.AddScoped<IProveedorRepository, ProveedorRepository>();
+builder.Services.AddScoped<IOrdenCompraRepository, OrdenCompraRepository>();
+builder.Services.AddScoped<IComprasService, ComprasService>();
 
 var app = builder.Build();
 

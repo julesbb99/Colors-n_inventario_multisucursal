@@ -8,6 +8,14 @@ public class OrdenCompra
     public int Id { get; set; }
     public int ProveedorId { get; set; }
     public int SucursalId { get; set; }
+
+    /// <summary>
+    /// Quien creo la orden. Obligatorio: una compra siempre tiene un
+    /// responsable, y hasta ahora ese dato solo sobrevivia en la bitacora de
+    /// auditoria, donde no se puede consultar desde la orden.
+    /// </summary>
+    public int UsuarioId { get; set; }
+
     public DateTime? Fecha { get; set; }
     public EstadoOrdenCompra? Estado { get; set; }
 
@@ -17,5 +25,6 @@ public class OrdenCompra
     // --- Navegacion ---
     public Proveedor Proveedor { get; set; } = null!;
     public Sucursal Sucursal { get; set; } = null!;
+    public Usuario Usuario { get; set; } = null!;
     public ICollection<OrdenCompraDetalle> Detalles { get; set; } = new List<OrdenCompraDetalle>();
 }
