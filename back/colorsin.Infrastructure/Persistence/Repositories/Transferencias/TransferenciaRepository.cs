@@ -1,0 +1,161 @@
+using Colorsin.Application.Transferencias.Repositories;
+using Colorsin.Domain.Inventario;
+using Colorsin.Domain.Transferencias;
+using Microsoft.EntityFrameworkCore;
+
+namespace Colorsin.Infrastructure.Persistence.Repositories.Transferencias;
+
+/// <inheritdoc cref="ITransferenciaRepository"/>
+public sealed class TransferenciaRepository : ITransferenciaRepository
+{
+    private readonly AppDbContext _db;
+
+    public TransferenciaRepository(AppDbContext db)
+    {
+        _db = db;
+    }
+
+    // =========================================================================
+    // CONSULTAS
+    // =========================================================================
+
+    public async Task<IReadOnlyList<Transferencia>> ObtenerAsync(
+        int? sucursalOrigenId = null,
+        int? sucursalDestinoId = null,
+        EstadoTransferencia? estado = null,
+        int limite = 100,
+        CancellationToken cancellationToken = default)
+    {
+        // Sin novedades ni movimientos: este metodo alimenta listados, y
+        // cargarlos por fila convertiria una consulta en muchas.
+        var consulta = _db.Transferencias
+            .AsNoTracking()
+            .Include(t => t.Producto)
+            .Include(t => t.SucursalOrigen)
+            .Include(t => t.SucursalDestino)
+            .Include(t => t.Transportadora)
+            .Include(t => t.Unidad)
+            .Include(t => t.Usuario)
+            .AsQueryable();
+
+        if (sucursalOrigenId is int origen)
+        {
+            consulta = consulta.Where(t => t.SucursalOrigenId == origen);
+        }
+
+        if (sucursalDestinoId is int destino)
+        {
+            consulta = consulta.Where(t => t.SucursalDestinoId == destino);
+        }
+
+        if (estado is EstadoTransferencia e)
+        {
+            consulta = consulta.Where(t => t.Estado == e);
+        }
+
+        return await consulta
+            .OrderByDescending(t => t.FechaSolicitud)
+            .ThenByDescending(t => t.Id)
+            // Tope duro: la tabla crece sin limite y una consulta sin LIMIT
+            // terminaria trayendola entera.
+            .Take(Math.Clamp(limite, 1, 1000))
+            .ToListAsync(cancellationToken);
+    }
+
+    public Task<Transferencia?> ObtenerPorIdAsync(
+        int id,
+        CancellationToken cancellationToken = default) =>
+        _db.Transferencias
+            .AsNoTracking()
+            .Include(t => t.Producto)
+            .Include(t => t.SucursalOrigen)
+            .Include(t => t.SucursalDestino)
+            .Include(t => t.Transportadora)
+            .Include(t => t.Unidad)
+            .Include(t => t.Usuario)
+            .Include(t => t.Novedades)
+                .ThenInclude(n => n.Usuario)
+            .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+
+    public async Task<Transferencia?> ObtenerParaOperarAsync(
+        int id,
+        CancellationToken cancellationToken = default)
+    {
+        // Se materializa con ToListAsync en vez de FirstOrDefaultAsync por lo
+        // mismo que en los otros repositorios: FirstOrDefaultAsync compone un
+        // LIMIT 1 y para ello encierra el SQL crudo en una subconsulta, donde el
+        // FOR UPDATE deja de aplicar sobre la tabla real. El WHERE cae sobre la
+        // clave primaria, asi que vuelve una fila como maximo.
+        //
+        // Sin AsNoTracking: el estado de este traslado se va a modificar.
+        var filas = await _db.Transferencias
+            .FromSqlInterpolated($"SELECT * FROM transferencias WHERE id = {id} FOR UPDATE")
+            .ToListAsync(cancellationToken);
+
+        return filas.FirstOrDefault();
+    }
+
+    public async Task<IReadOnlyList<MovimientoInventario>> ObtenerMovimientosDespachoAsync(
+        int transferenciaId,
+        CancellationToken cancellationToken = default) =>
+        await _db.MovimientosInventario
+            .AsNoTracking()
+            .Include(m => m.Lote)
+            .Include(m => m.Sucursal)
+            .Where(m => m.TransferenciaId == transferenciaId
+                     && m.Tipo == TipoMovimiento.Retiro)
+            // El mismo orden FEFO en que salieron: primero el lote que vencia
+            // antes. Asi, si llega menos de lo despachado, se completa antes el
+            // lote mas urgente. Los movimientos sin lote van al final, igual que
+            // en la consulta FEFO de inventario.
+            .OrderBy(m => m.Lote == null)
+            .ThenBy(m => m.Lote!.FechaVencimiento == null)
+            .ThenBy(m => m.Lote!.FechaVencimiento)
+            .ThenBy(m => m.Id)
+            .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<MovimientoInventario>> ObtenerMovimientosAsync(
+        int transferenciaId,
+        CancellationToken cancellationToken = default) =>
+        await _db.MovimientosInventario
+            .AsNoTracking()
+            .Include(m => m.Lote)
+            .Include(m => m.Sucursal)
+            .Where(m => m.TransferenciaId == transferenciaId)
+            .OrderBy(m => m.Id)
+            .ToListAsync(cancellationToken);
+
+    // =========================================================================
+    // ESCRITURA
+    // =========================================================================
+
+    public void AgregarTransferencia(Transferencia transferencia) =>
+        _db.Transferencias.Add(transferencia);
+
+    public void AgregarNovedad(NovedadTransferencia novedad) =>
+        _db.NovedadesTransferencia.Add(novedad);
+
+    public Task<int> GuardarCambiosAsync(CancellationToken cancellationToken = default) =>
+        _db.SaveChangesAsync(cancellationToken);
+
+    public async Task<T> EjecutarEnTransaccionAsync<T>(
+        Func<CancellationToken, Task<T>> operacion,
+        CancellationToken cancellationToken = default)
+    {
+        // La estrategia de ejecucion es obligatoria aqui: con EnableRetryOnFailure
+        // activo, EF Core lanza una excepcion si se llama a BeginTransaction por
+        // fuera de ella. La estrategia necesita envolver toda la operacion para
+        // poder repetirla completa ante un fallo transitorio de red.
+        var estrategia = _db.Database.CreateExecutionStrategy();
+
+        return await estrategia.ExecuteAsync(async ct =>
+        {
+            await using var transaccion = await _db.Database.BeginTransactionAsync(ct);
+
+            var resultado = await operacion(ct);
+
+            await transaccion.CommitAsync(ct);
+            return resultado;
+        }, cancellationToken);
+    }
+}

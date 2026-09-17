@@ -121,8 +121,10 @@ public class AppDbContext : DbContext
     // 'estado'").
     private const string EnumEstadoOrdenCompra =
         "enum('Pendiente','Confirmada','ParcialmenteRecibida','Recibida','Cancelada')";
+    // Debe coincidir valor por valor, y en el mismo orden, con el enum
+    // EstadoTransferencia del dominio.
     private const string EnumEstadoTransferencia =
-        "enum('Solicitada','EnPreparacion','EnTransito','RecibidaCompleta','RecibidaParcial')";
+        "enum('Solicitada','EnTransito','Completada','RecibidaParcial','Rechazada','Cancelada')";
     private const string EnumUrgencia = "enum('Baja','Media','Alta')";
     private const string EnumTipoNovedad = "enum('Faltante','Averia','Sobrante','Retraso')";
     private const string EnumTipoMovimiento = "enum('Ingreso','Retiro')";
@@ -361,6 +363,7 @@ public class AppDbContext : DbContext
             e.Property(x => x.UnidadId).HasColumnName("unidad_id").IsRequired();
             e.Property(x => x.CantidadBase).HasColumnName("cantidad_base").HasPrecision(14, 4);
             e.Property(x => x.LoteId).HasColumnName("lote_id");
+            e.Property(x => x.TransferenciaId).HasColumnName("transferencia_id");
             e.Property(x => x.Observaciones).HasColumnName("observaciones").HasMaxLength(255);
             e.Property(x => x.Fecha).HasColumnName("fecha")
              .HasColumnType("datetime").HasDefaultValueSql("CURRENT_TIMESTAMP")
@@ -374,6 +377,9 @@ public class AppDbContext : DbContext
             // IX_movimientos_inventario_lote_id y desentonaria con los idx_ del
             // resto del esquema.
             e.HasIndex(x => x.LoteId).HasDatabaseName("idx_movinv_lote");
+            // La recepcion de un traslado consulta por aqui los movimientos que
+            // genero su despacho, para saber de que lotes salio la mercancia.
+            e.HasIndex(x => x.TransferenciaId).HasDatabaseName("idx_movinv_transferencia");
             e.HasIndex(x => x.ProductoId).HasDatabaseName("idx_movinv_producto");
             e.HasIndex(x => x.UsuarioId).HasDatabaseName("idx_movinv_usuario");
             e.HasIndex(x => x.UnidadId).HasDatabaseName("idx_movinv_unidad");
@@ -417,6 +423,14 @@ public class AppDbContext : DbContext
              .WithMany()
              .HasForeignKey(x => x.LoteId)
              .HasConstraintName("fk_movinv_lote")
+             .OnDelete(DeleteBehavior.Restrict);
+
+            // Restrict, como el resto del libro mayor: borrar un traslado no
+            // puede llevarse por delante los movimientos que genero.
+            e.HasOne(x => x.Transferencia)
+             .WithMany()
+             .HasForeignKey(x => x.TransferenciaId)
+             .HasConstraintName("fk_movinv_transferencia")
              .OnDelete(DeleteBehavior.Restrict);
         });
     }
@@ -716,7 +730,11 @@ public class AppDbContext : DbContext
             e.Property(x => x.ProductoId).HasColumnName("producto_id").IsRequired();
             e.Property(x => x.SucursalOrigenId).HasColumnName("sucursal_origen_id").IsRequired();
             e.Property(x => x.SucursalDestinoId).HasColumnName("sucursal_destino_id").IsRequired();
-            e.Property(x => x.TransportadoraId).HasColumnName("transportadora_id").IsRequired();
+            e.Property(x => x.UsuarioId).HasColumnName("usuario_id").IsRequired();
+            // Nullable: al solicitar el traslado todavia no se sabe quien lo va
+            // a mover. Se asigna al despachar, junto con la guia.
+            e.Property(x => x.TransportadoraId).HasColumnName("transportadora_id");
+            e.Property(x => x.Guia).HasColumnName("guia").HasMaxLength(50);
             e.Property(x => x.CantidadSolicitada).HasColumnName("cantidad_solicitada").HasPrecision(14, 4);
             e.Property(x => x.CantidadRecibida).HasColumnName("cantidad_recibida").HasPrecision(14, 4);
             e.Property(x => x.UnidadId).HasColumnName("unidad_id").IsRequired();
@@ -735,6 +753,7 @@ public class AppDbContext : DbContext
             e.HasIndex(x => x.TransportadoraId).HasDatabaseName("idx_transf_transportadora");
             e.HasIndex(x => x.UnidadId).HasDatabaseName("idx_transf_unidad");
             e.HasIndex(x => x.Estado).HasDatabaseName("idx_transf_estado");
+            e.HasIndex(x => x.UsuarioId).HasDatabaseName("idx_transf_usuario");
 
             e.HasOne(x => x.Producto)
              .WithMany(p => p.Transferencias)
@@ -765,6 +784,16 @@ public class AppDbContext : DbContext
              .WithMany(u => u.Transferencias)
              .HasForeignKey(x => x.UnidadId)
              .HasConstraintName("fk_transf_unidad")
+             .OnDelete(DeleteBehavior.Restrict);
+
+            // Restrict, como en ordenes_compra y en el libro mayor: un usuario
+            // con traslados a su nombre no se puede borrar, o se perderia el
+            // rastro de quien pidio que. Sin coleccion inversa en Usuario:
+            // ninguna consulta la necesita.
+            e.HasOne(x => x.Usuario)
+             .WithMany()
+             .HasForeignKey(x => x.UsuarioId)
+             .HasConstraintName("fk_transf_usuario")
              .OnDelete(DeleteBehavior.Restrict);
         });
 

@@ -38,6 +38,19 @@ public class MovimientoInventario
     /// </summary>
     public int? LoteId { get; set; }
 
+    /// <summary>
+    /// Traslado que origino el movimiento, cuando lo hubo. Nulo en todo lo
+    /// demas: compras, ventas, ajustes.
+    ///
+    /// No es solo trazabilidad. La recepcion de un traslado necesita saber de
+    /// QUE lotes salio la mercancia en el origen, para recrearlos en el destino
+    /// con el mismo numero y vencimiento. Ese dato solo vive en las filas del
+    /// libro mayor que genero el despacho, y sin esta columna no habria forma
+    /// de aislar cuales son: `observaciones` es texto libre, no sirve para
+    /// consultar.
+    /// </summary>
+    public int? TransferenciaId { get; set; }
+
     /// <summary>Nota del operario sobre el movimiento.</summary>
     public string? Observaciones { get; set; }
 
@@ -49,4 +62,5 @@ public class MovimientoInventario
     public Usuario Usuario { get; set; } = null!;
     public UnidadMedida Unidad { get; set; } = null!;
     public Lote? Lote { get; set; }
+    public Transferencias.Transferencia? Transferencia { get; set; }
 }

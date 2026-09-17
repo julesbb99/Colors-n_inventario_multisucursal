@@ -5,12 +5,15 @@ using Colorsin.Application.Compras.Repositories;
 using Colorsin.Application.Compras.Services;
 using Colorsin.Application.Inventario.Repositories;
 using Colorsin.Application.Inventario.Services;
+using Colorsin.Application.Transferencias.Repositories;
+using Colorsin.Application.Transferencias.Services;
 using Colorsin.Application.Ventas.Repositories;
 using Colorsin.Application.Ventas.Services;
 using Colorsin.Infrastructure.Auditoria;
 using Colorsin.Infrastructure.Persistence;
 using Colorsin.Infrastructure.Persistence.Repositories;
 using Colorsin.Infrastructure.Persistence.Repositories.Compras;
+using Colorsin.Infrastructure.Persistence.Repositories.Transferencias;
 using Colorsin.Infrastructure.Persistence.Repositories.Ventas;
 using Microsoft.EntityFrameworkCore;
 
@@ -124,6 +127,17 @@ builder.Services.AddScoped<IComprasService, ComprasService>();
 builder.Services.AddScoped<IClienteRepository, ClienteRepository>();
 builder.Services.AddScoped<IVentaRepository, VentaRepository>();
 builder.Services.AddScoped<IVentasService, VentasService>();
+
+// -----------------------------------------------------------------------------
+// Modulo Transferencias: traslados entre sedes, novedades y transportadoras.
+//
+// Scoped, como todo lo demas, y aqui tambien importa por correccion: el despacho
+// y la recepcion descuentan y suman stock a traves de IInventarioRepository, y
+// solo comparten transaccion porque los dos usan el AppDbContext de la peticion.
+// -----------------------------------------------------------------------------
+builder.Services.AddScoped<ITransportadoraRepository, TransportadoraRepository>();
+builder.Services.AddScoped<ITransferenciaRepository, TransferenciaRepository>();
+builder.Services.AddScoped<ITransferenciasService, TransferenciasService>();
 
 var app = builder.Build();
 

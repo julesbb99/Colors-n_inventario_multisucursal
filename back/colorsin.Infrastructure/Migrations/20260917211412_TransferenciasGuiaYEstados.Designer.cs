@@ -4,6 +4,7 @@ using Colorsin.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace colorsin.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260917211412_TransferenciasGuiaYEstados")]
+    partial class TransferenciasGuiaYEstados
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -734,10 +737,6 @@ namespace colorsin.Infrastructure.Migrations
                         .HasColumnType("enum('Baja','Media','Alta')")
                         .HasColumnName("urgencia");
 
-                    b.Property<int>("UsuarioId")
-                        .HasColumnType("int")
-                        .HasColumnName("usuario_id");
-
                     b.HasKey("Id");
 
                     b.HasIndex("Estado")
@@ -754,9 +753,6 @@ namespace colorsin.Infrastructure.Migrations
 
                     b.HasIndex("UnidadId")
                         .HasDatabaseName("idx_transf_unidad");
-
-                    b.HasIndex("UsuarioId")
-                        .HasDatabaseName("idx_transf_usuario");
 
                     b.HasIndex("SucursalDestinoId", "Estado")
                         .HasDatabaseName("idx_transf_destino_estado");
@@ -1224,13 +1220,6 @@ namespace colorsin.Infrastructure.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_transf_unidad");
 
-                    b.HasOne("Colorsin.Domain.Comun.Usuario", "Usuario")
-                        .WithMany()
-                        .HasForeignKey("UsuarioId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_transf_usuario");
-
                     b.Navigation("Producto");
 
                     b.Navigation("SucursalDestino");
@@ -1240,8 +1229,6 @@ namespace colorsin.Infrastructure.Migrations
                     b.Navigation("Transportadora");
 
                     b.Navigation("Unidad");
-
-                    b.Navigation("Usuario");
                 });
 
             modelBuilder.Entity("Colorsin.Domain.Ventas.Venta", b =>
