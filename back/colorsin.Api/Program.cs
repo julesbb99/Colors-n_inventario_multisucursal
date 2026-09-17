@@ -5,10 +5,13 @@ using Colorsin.Application.Compras.Repositories;
 using Colorsin.Application.Compras.Services;
 using Colorsin.Application.Inventario.Repositories;
 using Colorsin.Application.Inventario.Services;
+using Colorsin.Application.Ventas.Repositories;
+using Colorsin.Application.Ventas.Services;
 using Colorsin.Infrastructure.Auditoria;
 using Colorsin.Infrastructure.Persistence;
 using Colorsin.Infrastructure.Persistence.Repositories;
 using Colorsin.Infrastructure.Persistence.Repositories.Compras;
+using Colorsin.Infrastructure.Persistence.Repositories.Ventas;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -110,6 +113,17 @@ builder.Services.AddScoped<IInventarioService, InventarioService>();
 builder.Services.AddScoped<IProveedorRepository, ProveedorRepository>();
 builder.Services.AddScoped<IOrdenCompraRepository, OrdenCompraRepository>();
 builder.Services.AddScoped<IComprasService, ComprasService>();
+
+// -----------------------------------------------------------------------------
+// Modulo Ventas: clientes y ventas.
+//
+// Scoped, como todo lo demas, y aqui tambien importa por correccion:
+// VentasService descuenta stock a traves de IInventarioRepository y solo
+// comparten transaccion porque los dos usan el AppDbContext de la peticion.
+// -----------------------------------------------------------------------------
+builder.Services.AddScoped<IClienteRepository, ClienteRepository>();
+builder.Services.AddScoped<IVentaRepository, VentaRepository>();
+builder.Services.AddScoped<IVentasService, VentasService>();
 
 var app = builder.Build();
 

@@ -102,12 +102,12 @@ public class AppDbContext : DbContext
     private const string EnumRolUsuario = "enum('Administrador General','Gerente de Sucursal','Operador')";
     private const string EnumTipoPersona = "enum('Natural','Juridica')";
     private const string EnumTipoServicio = "enum('urgente','estandar')";
-    // 'Confirmada' se retiro al entrar 'ParcialmenteRecibida'. Esta lista debe
-    // coincidir valor por valor con el enum EstadoOrdenCompra del dominio: si
-    // se separan, guardar un estado que falte aqui falla con el error 1265 de
-    // MySQL ("Data truncated for column 'estado'").
+    // Esta lista debe coincidir valor por valor, y en el mismo orden, con el
+    // enum EstadoOrdenCompra del dominio: si se separan, guardar un estado que
+    // falte aqui falla con el error 1265 de MySQL ("Data truncated for column
+    // 'estado'").
     private const string EnumEstadoOrdenCompra =
-        "enum('Pendiente','ParcialmenteRecibida','Recibida','Cancelada')";
+        "enum('Pendiente','Confirmada','ParcialmenteRecibida','Recibida','Cancelada')";
     private const string EnumEstadoTransferencia =
         "enum('Solicitada','EnPreparacion','EnTransito','RecibidaCompleta','RecibidaParcial')";
     private const string EnumUrgencia = "enum('Baja','Media','Alta')";
@@ -494,14 +494,11 @@ public class AppDbContext : DbContext
             e.Property(x => x.ProductoId).HasColumnName("producto_id").IsRequired();
             e.Property(x => x.Cantidad).HasColumnName("cantidad").HasPrecision(14, 4);
 
-            // OJO: (12,4) frente a los (14,4) de `cantidad`. El tope de lo
-            // recibido queda en 99.999.999,9999 y el de lo pedido es cien veces
-            // mayor, asi que una linea por encima de ese tope no se podria
-            // completar. Con litros de pintura no se acerca ni de lejos, pero
-            // las dos columnas se comparan entre si y lo natural seria que
-            // tuvieran la misma escala.
+            // Misma escala que `cantidad`, con la que se compara en cada
+            // recepcion: (14,4) las dos. Con escalas distintas habria un rango
+            // de cantidades pedidas que no se podrian completar nunca.
             e.Property(x => x.CantidadRecibida).HasColumnName("cantidad_recibida")
-             .HasPrecision(12, 4).HasDefaultValue(0m);
+             .HasPrecision(14, 4).HasDefaultValue(0m);
 
             e.Property(x => x.UnidadId).HasColumnName("unidad_id").IsRequired();
             e.Property(x => x.PrecioUnitario).HasColumnName("precio_unitario").HasPrecision(12, 2);

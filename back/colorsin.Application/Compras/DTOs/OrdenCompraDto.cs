@@ -9,7 +9,9 @@ namespace Colorsin.Application.Compras.DTOs;
 /// <param name="UsuarioId">Quien creo la orden.</param>
 /// <param name="UsuarioNombre">Nombre de esa persona.</param>
 /// <param name="Fecha">Cuando se creo la orden.</param>
-/// <param name="Estado">'Pendiente', 'ParcialmenteRecibida', 'Recibida' o 'Cancelada'.</param>
+/// <param name="Estado">
+/// 'Pendiente', 'Confirmada', 'ParcialmenteRecibida', 'Recibida' o 'Cancelada'.
+/// </param>
 /// <param name="PlazoPagoDias">Dias de credito pactados. Cero es contado.</param>
 /// <param name="Detalles">
 /// Lineas de la orden. Viene vacia en los listados, que no cargan el detalle

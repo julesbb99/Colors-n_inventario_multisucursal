@@ -20,12 +20,18 @@ public sealed class ComprasService : IComprasService
     /// <summary>
     /// Estados desde los que todavia puede llegar mercancia.
     ///
-    /// 'ParcialmenteRecibida' entra porque una orden a medias sigue esperando
-    /// entregas. 'Recibida' queda fuera para que una confirmacion repetida no
-    /// duplique el stock, y 'Cancelada' porque lo cancelado no llega.
+    /// 'Confirmada' entra porque un pedido que el proveedor ya acuso es
+    /// justamente el que esta por llegar, y 'ParcialmenteRecibida' porque una
+    /// orden a medias sigue esperando entregas. 'Recibida' queda fuera para que
+    /// una confirmacion repetida no duplique el stock, y 'Cancelada' porque lo
+    /// cancelado no llega.
     /// </summary>
     private static readonly EstadoOrdenCompra[] EstadosQuePermitenRecepcion =
-        [EstadoOrdenCompra.Pendiente, EstadoOrdenCompra.ParcialmenteRecibida];
+    [
+        EstadoOrdenCompra.Pendiente,
+        EstadoOrdenCompra.Confirmada,
+        EstadoOrdenCompra.ParcialmenteRecibida
+    ];
 
     private readonly IOrdenCompraRepository _ordenes;
     private readonly IProveedorRepository _proveedores;
@@ -279,7 +285,8 @@ public sealed class ComprasService : IComprasService
             return ResultadoRecepcion.Fallo(
                 ErrorCompra.EstadoNoPermiteRecepcion,
                 $"La orden {orden.Id} esta en estado '{orden.Estado?.ToString() ?? "sin estado"}' " +
-                "y solo admite entregas una orden Pendiente o ParcialmenteRecibida.");
+                "y solo admite entregas una orden Pendiente, Confirmada o " +
+                "ParcialmenteRecibida.");
         }
 
         if (orden.Detalles.Count == 0)
