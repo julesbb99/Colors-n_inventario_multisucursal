@@ -1,4 +1,7 @@
+using Colorsin.Application.Comun.Repositories;
+using Colorsin.Application.Comun.Services;
 using Colorsin.Infrastructure.Persistence;
+using Colorsin.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -56,6 +59,23 @@ builder.Services.AddDbContext<AppDbContext>(options =>
         options.EnableSensitiveDataLogging();
     }
 });
+
+// -----------------------------------------------------------------------------
+// Modulo Comun: sucursales, usuarios y unidades de medida.
+//
+// Todo va con lifetime Scoped, es decir una instancia por peticion HTTP, porque
+// los repositorios dependen de AppDbContext y AddDbContext lo registra Scoped.
+// Si un repositorio fuera Singleton se quedaria con el DbContext de la primera
+// peticion (captive dependency): el contenedor lo detecta y la app no arranca.
+// Transient tampoco: crearia varios repositorios por peticion sin ganar nada.
+// -----------------------------------------------------------------------------
+builder.Services.AddScoped<ISucursalRepository, SucursalRepository>();
+builder.Services.AddScoped<IUsuarioRepository, UsuarioRepository>();
+builder.Services.AddScoped<IUnidadMedidaRepository, UnidadMedidaRepository>();
+
+builder.Services.AddScoped<ISucursalService, SucursalService>();
+builder.Services.AddScoped<IUsuarioService, UsuarioService>();
+builder.Services.AddScoped<IUnidadMedidaService, UnidadMedidaService>();
 
 var app = builder.Build();
 
