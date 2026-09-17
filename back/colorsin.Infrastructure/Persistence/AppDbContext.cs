@@ -209,7 +209,11 @@ public class AppDbContext : DbContext
             e.Property(x => x.NumeroLote).HasColumnName("numero_lote").HasMaxLength(50).IsRequired();
             e.Property(x => x.FechaVencimiento).HasColumnName("fecha_vencimiento").HasColumnType("date");
             e.Property(x => x.CantidadBase).HasColumnName("cantidad_base").HasPrecision(14, 4);
-            e.Property(x => x.FechaIngreso).HasColumnName("fecha_ingreso").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            // datetime sin precision fraccionaria: Pomelo mapearia DateTime a
+            // datetime(6), y MySQL rechaza DEFAULT CURRENT_TIMESTAMP sobre esa
+            // precision. La base fisica usa datetime a secas.
+            e.Property(x => x.FechaIngreso).HasColumnName("fecha_ingreso")
+             .HasColumnType("datetime").HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             e.HasIndex(x => x.FechaVencimiento).HasDatabaseName("idx_lotes_vencimiento");
             e.HasIndex(x => x.NumeroLote).HasDatabaseName("idx_lotes_numero");
@@ -241,7 +245,8 @@ public class AppDbContext : DbContext
             e.Property(x => x.Cantidad).HasColumnName("cantidad").HasPrecision(14, 4);
             e.Property(x => x.UnidadId).HasColumnName("unidad_id").IsRequired();
             e.Property(x => x.CantidadBase).HasColumnName("cantidad_base").HasPrecision(14, 4);
-            e.Property(x => x.Fecha).HasColumnName("fecha").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            e.Property(x => x.Fecha).HasColumnName("fecha")
+             .HasColumnType("datetime").HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             // Indice principal: reconstruir el saldo de un producto en una sede.
             e.HasIndex(x => new { x.SucursalId, x.ProductoId, x.Fecha })
@@ -328,7 +333,8 @@ public class AppDbContext : DbContext
             e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
             e.Property(x => x.ProveedorId).HasColumnName("proveedor_id").IsRequired();
             e.Property(x => x.SucursalId).HasColumnName("sucursal_id").IsRequired();
-            e.Property(x => x.Fecha).HasColumnName("fecha").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            e.Property(x => x.Fecha).HasColumnName("fecha")
+             .HasColumnType("datetime").HasDefaultValueSql("CURRENT_TIMESTAMP");
             e.Property(x => x.Estado).HasColumnName("estado").HasConversion<string>();
             e.Property(x => x.PlazoPagoDias).HasColumnName("plazo_pago_dias");
 
@@ -412,7 +418,8 @@ public class AppDbContext : DbContext
             e.Property(x => x.ClienteId).HasColumnName("cliente_id").IsRequired();
             e.Property(x => x.SucursalId).HasColumnName("sucursal_id").IsRequired();
             e.Property(x => x.UsuarioId).HasColumnName("usuario_id").IsRequired();
-            e.Property(x => x.Fecha).HasColumnName("fecha").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            e.Property(x => x.Fecha).HasColumnName("fecha")
+             .HasColumnType("datetime").HasDefaultValueSql("CURRENT_TIMESTAMP");
             e.Property(x => x.Total).HasColumnName("total").HasPrecision(14, 2);
 
             e.HasIndex(x => new { x.SucursalId, x.Fecha }).HasDatabaseName("idx_ventas_sucursal_fecha");
@@ -505,8 +512,10 @@ public class AppDbContext : DbContext
             e.Property(x => x.UnidadId).HasColumnName("unidad_id").IsRequired();
             e.Property(x => x.Estado).HasColumnName("estado").HasConversion<string>();
             e.Property(x => x.Urgencia).HasColumnName("urgencia").HasConversion<string>();
-            e.Property(x => x.FechaSolicitud).HasColumnName("fecha_solicitud").HasDefaultValueSql("CURRENT_TIMESTAMP");
-            e.Property(x => x.FechaEstimadaLlegada).HasColumnName("fecha_estimada_llegada");
+            e.Property(x => x.FechaSolicitud).HasColumnName("fecha_solicitud")
+             .HasColumnType("datetime").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            e.Property(x => x.FechaEstimadaLlegada).HasColumnName("fecha_estimada_llegada")
+             .HasColumnType("datetime");
 
             e.HasIndex(x => new { x.SucursalDestinoId, x.Estado }).HasDatabaseName("idx_transf_destino_estado");
 
@@ -553,7 +562,8 @@ public class AppDbContext : DbContext
             e.Property(x => x.Tipo).HasColumnName("tipo").HasConversion<string>();
             e.Property(x => x.CantidadAfectada).HasColumnName("cantidad_afectada").HasPrecision(14, 4);
             e.Property(x => x.Observaciones).HasColumnName("observaciones").HasColumnType("text");
-            e.Property(x => x.Fecha).HasColumnName("fecha").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            e.Property(x => x.Fecha).HasColumnName("fecha")
+             .HasColumnType("datetime").HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             // La novedad pertenece al traslado, pero conserva a su reportante.
             e.HasOne(x => x.Transferencia)

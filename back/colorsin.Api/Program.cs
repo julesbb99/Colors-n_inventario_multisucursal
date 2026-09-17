@@ -12,12 +12,19 @@ builder.Services.AddOpenApi();
 // Secrets, fuera del repositorio. appsettings.json solo guarda la plantilla,
 // con el marcador de posicion que se valida abajo.
 //
-// ServerVersion.AutoDetect abre una conexion al arrancar para preguntarle su
-// version al servidor. Es comodo en desarrollo, pero exige que el contenedor
-// este arriba antes que la API; si no, la aplicacion falla al iniciar.
-// En despliegue conviene fijarla: new MySqlServerVersion(new Version(8, 4, 0)).
+// La version del servidor va FIJA, no con ServerVersion.AutoDetect: esa
+// variante abre una conexion durante el arranque para preguntarle su version
+// al servidor, asi que la API no levanta si el contenedor esta apagado y
+// paga una ida y vuelta extra en cada inicio.
+//
+// Valor tomado del servidor real: mysql 8.4.11 for Linux on x86_64
+// (MySQL Community Server - GPL), la imagen mysql:8.4 del docker-compose.
+// Si algun dia subes la imagen de MySQL, actualiza tambien esta constante.
 // -----------------------------------------------------------------------------
 const string MarcadorSinConfigurar = "__DEFINIR_EN_USER_SECRETS__";
+
+// Version del contenedor MySQL declarado en docker-compose.yml (imagen mysql:8.4).
+var versionServidor = new MySqlServerVersion(new Version(8, 4, 11));
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 
@@ -38,7 +45,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 {
     options.UseMySql(
         connectionString,
-        ServerVersion.AutoDetect(connectionString),
+        versionServidor,
         mySqlOptions => mySqlOptions.EnableRetryOnFailure());
 
     if (builder.Environment.IsDevelopment())
