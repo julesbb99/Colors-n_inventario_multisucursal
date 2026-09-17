@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace colorsin.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260917005307_InitialCreate")]
+    [Migration("20260917010821_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -36,7 +36,7 @@ namespace colorsin.Infrastructure.Migrations
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("Estado")
-                        .HasColumnType("varchar(255)")
+                        .HasColumnType("enum('Pendiente','Confirmada','Recibida','Cancelada')")
                         .HasColumnName("estado");
 
                     b.Property<DateTime?>("Fecha")
@@ -67,7 +67,10 @@ namespace colorsin.Infrastructure.Migrations
                     b.HasIndex("SucursalId", "Fecha")
                         .HasDatabaseName("idx_oc_sucursal_fecha");
 
-                    b.ToTable("ordenes_compra", (string)null);
+                    b.ToTable("ordenes_compra", null, t =>
+                        {
+                            t.HasCheckConstraint("chk_oc_plazo_pago", "`plazo_pago_dias` IS NULL OR `plazo_pago_dias` >= 0");
+                        });
                 });
 
             modelBuilder.Entity("Colorsin.Domain.Compras.OrdenCompraDetalle", b =>
@@ -116,7 +119,14 @@ namespace colorsin.Infrastructure.Migrations
 
                     b.HasIndex("UnidadId");
 
-                    b.ToTable("orden_compra_detalle", (string)null);
+                    b.ToTable("orden_compra_detalle", null, t =>
+                        {
+                            t.HasCheckConstraint("chk_ocd_cantidad", "`cantidad` IS NULL OR `cantidad` > 0");
+
+                            t.HasCheckConstraint("chk_ocd_descuento", "`descuento` >= 0 AND `descuento` <= 100");
+
+                            t.HasCheckConstraint("chk_ocd_precio", "`precio_unitario` IS NULL OR `precio_unitario` >= 0");
+                        });
                 });
 
             modelBuilder.Entity("Colorsin.Domain.Compras.ProductoProveedor", b =>
@@ -216,7 +226,7 @@ namespace colorsin.Infrastructure.Migrations
 
                     b.Property<string>("RolRed")
                         .IsRequired()
-                        .HasColumnType("longtext")
+                        .HasColumnType("enum('Matriz','Sucursal')")
                         .HasColumnName("rol_red");
 
                     b.HasKey("Id");
@@ -253,7 +263,7 @@ namespace colorsin.Infrastructure.Migrations
 
                     b.Property<string>("Rol")
                         .IsRequired()
-                        .HasColumnType("longtext")
+                        .HasColumnType("enum('Administrador General','Gerente de Sucursal','Operador')")
                         .HasColumnName("rol");
 
                     b.Property<int?>("SucursalId")
@@ -399,7 +409,7 @@ namespace colorsin.Infrastructure.Migrations
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
                     b.Property<string>("Motivo")
-                        .HasColumnType("longtext")
+                        .HasColumnType("enum('Compra','Venta','Ajuste','Transferencia','Merma','Devolucion')")
                         .HasColumnName("motivo");
 
                     b.Property<int>("ProductoId")
@@ -411,7 +421,7 @@ namespace colorsin.Infrastructure.Migrations
                         .HasColumnName("sucursal_id");
 
                     b.Property<string>("Tipo")
-                        .HasColumnType("longtext")
+                        .HasColumnType("enum('Ingreso','Retiro')")
                         .HasColumnName("tipo");
 
                     b.Property<int>("UnidadId")
@@ -433,7 +443,12 @@ namespace colorsin.Infrastructure.Migrations
                     b.HasIndex("SucursalId", "ProductoId", "Fecha")
                         .HasDatabaseName("idx_movinv_sucursal_producto_fecha");
 
-                    b.ToTable("movimientos_inventario", (string)null);
+                    b.ToTable("movimientos_inventario", null, t =>
+                        {
+                            t.HasCheckConstraint("chk_movinv_cantidad", "`cantidad` IS NULL OR `cantidad` > 0");
+
+                            t.HasCheckConstraint("chk_movinv_cantidad_base", "`cantidad_base` IS NULL OR `cantidad_base` > 0");
+                        });
                 });
 
             modelBuilder.Entity("Colorsin.Domain.Inventario.Producto", b =>
@@ -527,7 +542,7 @@ namespace colorsin.Infrastructure.Migrations
                         .HasColumnName("observaciones");
 
                     b.Property<string>("Tipo")
-                        .HasColumnType("longtext")
+                        .HasColumnType("enum('Faltante','Averia','Sobrante','Retraso')")
                         .HasColumnName("tipo");
 
                     b.Property<int>("TransferenciaId")
@@ -544,7 +559,10 @@ namespace colorsin.Infrastructure.Migrations
 
                     b.HasIndex("UsuarioId");
 
-                    b.ToTable("novedades_transferencia", (string)null);
+                    b.ToTable("novedades_transferencia", null, t =>
+                        {
+                            t.HasCheckConstraint("chk_novtransf_cantidad", "`cantidad_afectada` IS NULL OR `cantidad_afectada` >= 0");
+                        });
                 });
 
             modelBuilder.Entity("Colorsin.Domain.Transferencias.Transferencia", b =>
@@ -567,7 +585,7 @@ namespace colorsin.Infrastructure.Migrations
                         .HasColumnName("cantidad_solicitada");
 
                     b.Property<string>("Estado")
-                        .HasColumnType("varchar(255)")
+                        .HasColumnType("enum('Solicitada','EnPreparacion','EnTransito','RecibidaCompleta','RecibidaParcial')")
                         .HasColumnName("estado");
 
                     b.Property<DateTime?>("FechaEstimadaLlegada")
@@ -601,7 +619,7 @@ namespace colorsin.Infrastructure.Migrations
                         .HasColumnName("unidad_id");
 
                     b.Property<string>("Urgencia")
-                        .HasColumnType("longtext")
+                        .HasColumnType("enum('Baja','Media','Alta')")
                         .HasColumnName("urgencia");
 
                     b.HasKey("Id");
@@ -617,7 +635,12 @@ namespace colorsin.Infrastructure.Migrations
                     b.HasIndex("SucursalDestinoId", "Estado")
                         .HasDatabaseName("idx_transf_destino_estado");
 
-                    b.ToTable("transferencias", (string)null);
+                    b.ToTable("transferencias", null, t =>
+                        {
+                            t.HasCheckConstraint("chk_transf_cantidades", "(`cantidad_solicitada` IS NULL OR `cantidad_solicitada` > 0) AND (`cantidad_recibida` IS NULL OR `cantidad_recibida` >= 0)");
+
+                            t.HasCheckConstraint("chk_transf_sedes_distintas", "`sucursal_origen_id` <> `sucursal_destino_id`");
+                        });
                 });
 
             modelBuilder.Entity("Colorsin.Domain.Transferencias.Transportadora", b =>
@@ -637,7 +660,7 @@ namespace colorsin.Infrastructure.Migrations
 
                     b.Property<string>("TipoServicio")
                         .IsRequired()
-                        .HasColumnType("longtext")
+                        .HasColumnType("enum('urgente','estandar')")
                         .HasColumnName("tipo_servicio");
 
                     b.HasKey("Id");
@@ -683,7 +706,7 @@ namespace colorsin.Infrastructure.Migrations
 
                     b.Property<string>("TipoPersona")
                         .IsRequired()
-                        .HasColumnType("longtext")
+                        .HasColumnType("enum('Natural','Juridica')")
                         .HasColumnName("tipo_persona");
 
                     b.HasKey("Id");
@@ -736,7 +759,10 @@ namespace colorsin.Infrastructure.Migrations
                     b.HasIndex("SucursalId", "Fecha")
                         .HasDatabaseName("idx_ventas_sucursal_fecha");
 
-                    b.ToTable("ventas", (string)null);
+                    b.ToTable("ventas", null, t =>
+                        {
+                            t.HasCheckConstraint("chk_ventas_total", "`total` IS NULL OR `total` >= 0");
+                        });
                 });
 
             modelBuilder.Entity("Colorsin.Domain.Ventas.VentaDetalle", b =>
@@ -785,7 +811,14 @@ namespace colorsin.Infrastructure.Migrations
 
                     b.HasIndex("VentaId");
 
-                    b.ToTable("venta_detalle", (string)null);
+                    b.ToTable("venta_detalle", null, t =>
+                        {
+                            t.HasCheckConstraint("chk_vd_cantidad", "`cantidad` IS NULL OR `cantidad` > 0");
+
+                            t.HasCheckConstraint("chk_vd_descuento", "`descuento` >= 0 AND `descuento` <= 100");
+
+                            t.HasCheckConstraint("chk_vd_precio", "`precio_unitario` IS NULL OR `precio_unitario` >= 0");
+                        });
                 });
 
             modelBuilder.Entity("Colorsin.Domain.Compras.OrdenCompra", b =>

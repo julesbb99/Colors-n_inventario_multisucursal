@@ -8,7 +8,7 @@ START TRANSACTION;
 CREATE TABLE `clientes` (
     `id` int NOT NULL AUTO_INCREMENT,
     `razon_social` varchar(150) COLLATE utf8mb4_0900_ai_ci NOT NULL,
-    `tipo_persona` longtext COLLATE utf8mb4_0900_ai_ci NOT NULL,
+    `tipo_persona` enum('Natural','Juridica') COLLATE utf8mb4_0900_ai_ci NOT NULL,
     `documento` varchar(20) COLLATE utf8mb4_0900_ai_ci NOT NULL,
     `telefono` varchar(20) COLLATE utf8mb4_0900_ai_ci NULL,
     `email` varchar(100) COLLATE utf8mb4_0900_ai_ci NULL,
@@ -29,7 +29,7 @@ CREATE TABLE `sucursales` (
     `nombre` varchar(100) COLLATE utf8mb4_0900_ai_ci NOT NULL,
     `ciudad` varchar(80) COLLATE utf8mb4_0900_ai_ci NOT NULL,
     `direccion` varchar(150) COLLATE utf8mb4_0900_ai_ci NULL,
-    `rol_red` longtext COLLATE utf8mb4_0900_ai_ci NOT NULL,
+    `rol_red` enum('Matriz','Sucursal') COLLATE utf8mb4_0900_ai_ci NOT NULL,
     `descripcion` varchar(200) COLLATE utf8mb4_0900_ai_ci NULL,
     CONSTRAINT `PK_sucursales` PRIMARY KEY (`id`)
 ) COLLATE=utf8mb4_0900_ai_ci;
@@ -37,7 +37,7 @@ CREATE TABLE `sucursales` (
 CREATE TABLE `transportadoras` (
     `id` int NOT NULL AUTO_INCREMENT,
     `nombre` varchar(100) COLLATE utf8mb4_0900_ai_ci NOT NULL,
-    `tipo_servicio` longtext COLLATE utf8mb4_0900_ai_ci NOT NULL,
+    `tipo_servicio` enum('urgente','estandar') COLLATE utf8mb4_0900_ai_ci NOT NULL,
     CONSTRAINT `PK_transportadoras` PRIMARY KEY (`id`)
 ) COLLATE=utf8mb4_0900_ai_ci;
 
@@ -54,9 +54,10 @@ CREATE TABLE `ordenes_compra` (
     `proveedor_id` int NOT NULL,
     `sucursal_id` int NOT NULL,
     `fecha` datetime NULL DEFAULT CURRENT_TIMESTAMP,
-    `estado` varchar(255) COLLATE utf8mb4_0900_ai_ci NULL,
+    `estado` enum('Pendiente','Confirmada','Recibida','Cancelada') COLLATE utf8mb4_0900_ai_ci NULL,
     `plazo_pago_dias` int NULL,
     CONSTRAINT `PK_ordenes_compra` PRIMARY KEY (`id`),
+    CONSTRAINT `chk_oc_plazo_pago` CHECK (`plazo_pago_dias` IS NULL OR `plazo_pago_dias` >= 0),
     CONSTRAINT `fk_oc_proveedor` FOREIGN KEY (`proveedor_id`) REFERENCES `proveedores` (`id`) ON DELETE RESTRICT,
     CONSTRAINT `fk_oc_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales` (`id`) ON DELETE RESTRICT
 ) COLLATE=utf8mb4_0900_ai_ci;
@@ -66,7 +67,7 @@ CREATE TABLE `usuarios` (
     `nombre` varchar(100) COLLATE utf8mb4_0900_ai_ci NOT NULL,
     `email` varchar(100) COLLATE utf8mb4_0900_ai_ci NOT NULL,
     `password_hash` varchar(255) COLLATE utf8mb4_0900_ai_ci NOT NULL,
-    `rol` longtext COLLATE utf8mb4_0900_ai_ci NOT NULL,
+    `rol` enum('Administrador General','Gerente de Sucursal','Operador') COLLATE utf8mb4_0900_ai_ci NOT NULL,
     `sucursal_id` int NULL,
     CONSTRAINT `PK_usuarios` PRIMARY KEY (`id`),
     CONSTRAINT `fk_usuarios_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales` (`id`) ON DELETE SET NULL
@@ -90,6 +91,7 @@ CREATE TABLE `ventas` (
     `fecha` datetime NULL DEFAULT CURRENT_TIMESTAMP,
     `total` decimal(14,2) NULL,
     CONSTRAINT `PK_ventas` PRIMARY KEY (`id`),
+    CONSTRAINT `chk_ventas_total` CHECK (`total` IS NULL OR `total` >= 0),
     CONSTRAINT `fk_ventas_cliente` FOREIGN KEY (`cliente_id`) REFERENCES `clientes` (`id`) ON DELETE RESTRICT,
     CONSTRAINT `fk_ventas_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales` (`id`) ON DELETE RESTRICT,
     CONSTRAINT `fk_ventas_usuario` FOREIGN KEY (`usuario_id`) REFERENCES `usuarios` (`id`) ON DELETE RESTRICT
@@ -125,13 +127,15 @@ CREATE TABLE `movimientos_inventario` (
     `sucursal_id` int NOT NULL,
     `producto_id` int NOT NULL,
     `usuario_id` int NOT NULL,
-    `tipo` longtext COLLATE utf8mb4_0900_ai_ci NULL,
-    `motivo` longtext COLLATE utf8mb4_0900_ai_ci NULL,
+    `tipo` enum('Ingreso','Retiro') COLLATE utf8mb4_0900_ai_ci NULL,
+    `motivo` enum('Compra','Venta','Ajuste','Transferencia','Merma','Devolucion') COLLATE utf8mb4_0900_ai_ci NULL,
     `cantidad` decimal(14,4) NULL,
     `unidad_id` int NOT NULL,
     `cantidad_base` decimal(14,4) NULL,
     `fecha` datetime NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT `PK_movimientos_inventario` PRIMARY KEY (`id`),
+    CONSTRAINT `chk_movinv_cantidad` CHECK (`cantidad` IS NULL OR `cantidad` > 0),
+    CONSTRAINT `chk_movinv_cantidad_base` CHECK (`cantidad_base` IS NULL OR `cantidad_base` > 0),
     CONSTRAINT `fk_movinv_producto` FOREIGN KEY (`producto_id`) REFERENCES `productos` (`id`) ON DELETE RESTRICT,
     CONSTRAINT `fk_movinv_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales` (`id`) ON DELETE RESTRICT,
     CONSTRAINT `fk_movinv_unidad` FOREIGN KEY (`unidad_id`) REFERENCES `unidades_medida` (`id`) ON DELETE RESTRICT,
@@ -147,6 +151,9 @@ CREATE TABLE `orden_compra_detalle` (
     `precio_unitario` decimal(12,2) NULL,
     `descuento` decimal(5,2) NOT NULL DEFAULT 0.0,
     CONSTRAINT `PK_orden_compra_detalle` PRIMARY KEY (`id`),
+    CONSTRAINT `chk_ocd_cantidad` CHECK (`cantidad` IS NULL OR `cantidad` > 0),
+    CONSTRAINT `chk_ocd_descuento` CHECK (`descuento` >= 0 AND `descuento` <= 100),
+    CONSTRAINT `chk_ocd_precio` CHECK (`precio_unitario` IS NULL OR `precio_unitario` >= 0),
     CONSTRAINT `fk_ocd_orden` FOREIGN KEY (`orden_compra_id`) REFERENCES `ordenes_compra` (`id`) ON DELETE CASCADE,
     CONSTRAINT `fk_ocd_producto` FOREIGN KEY (`producto_id`) REFERENCES `productos` (`id`) ON DELETE RESTRICT,
     CONSTRAINT `fk_ocd_unidad` FOREIGN KEY (`unidad_id`) REFERENCES `unidades_medida` (`id`) ON DELETE RESTRICT
@@ -171,11 +178,13 @@ CREATE TABLE `transferencias` (
     `cantidad_solicitada` decimal(14,4) NULL,
     `cantidad_recibida` decimal(14,4) NULL,
     `unidad_id` int NOT NULL,
-    `estado` varchar(255) COLLATE utf8mb4_0900_ai_ci NULL,
-    `urgencia` longtext COLLATE utf8mb4_0900_ai_ci NULL,
+    `estado` enum('Solicitada','EnPreparacion','EnTransito','RecibidaCompleta','RecibidaParcial') COLLATE utf8mb4_0900_ai_ci NULL,
+    `urgencia` enum('Baja','Media','Alta') COLLATE utf8mb4_0900_ai_ci NULL,
     `fecha_solicitud` datetime NULL DEFAULT CURRENT_TIMESTAMP,
     `fecha_estimada_llegada` datetime NULL,
     CONSTRAINT `PK_transferencias` PRIMARY KEY (`id`),
+    CONSTRAINT `chk_transf_cantidades` CHECK ((`cantidad_solicitada` IS NULL OR `cantidad_solicitada` > 0) AND (`cantidad_recibida` IS NULL OR `cantidad_recibida` >= 0)),
+    CONSTRAINT `chk_transf_sedes_distintas` CHECK (`sucursal_origen_id` <> `sucursal_destino_id`),
     CONSTRAINT `fk_transf_producto` FOREIGN KEY (`producto_id`) REFERENCES `productos` (`id`) ON DELETE RESTRICT,
     CONSTRAINT `fk_transf_sucursal_destino` FOREIGN KEY (`sucursal_destino_id`) REFERENCES `sucursales` (`id`) ON DELETE RESTRICT,
     CONSTRAINT `fk_transf_sucursal_origen` FOREIGN KEY (`sucursal_origen_id`) REFERENCES `sucursales` (`id`) ON DELETE RESTRICT,
@@ -192,6 +201,9 @@ CREATE TABLE `venta_detalle` (
     `precio_unitario` decimal(12,2) NULL,
     `descuento` decimal(5,2) NOT NULL DEFAULT 0.0,
     CONSTRAINT `PK_venta_detalle` PRIMARY KEY (`id`),
+    CONSTRAINT `chk_vd_cantidad` CHECK (`cantidad` IS NULL OR `cantidad` > 0),
+    CONSTRAINT `chk_vd_descuento` CHECK (`descuento` >= 0 AND `descuento` <= 100),
+    CONSTRAINT `chk_vd_precio` CHECK (`precio_unitario` IS NULL OR `precio_unitario` >= 0),
     CONSTRAINT `fk_vd_producto` FOREIGN KEY (`producto_id`) REFERENCES `productos` (`id`) ON DELETE RESTRICT,
     CONSTRAINT `fk_vd_unidad` FOREIGN KEY (`unidad_id`) REFERENCES `unidades_medida` (`id`) ON DELETE RESTRICT,
     CONSTRAINT `fk_vd_venta` FOREIGN KEY (`venta_id`) REFERENCES `ventas` (`id`) ON DELETE CASCADE
@@ -201,11 +213,12 @@ CREATE TABLE `novedades_transferencia` (
     `id` int NOT NULL AUTO_INCREMENT,
     `transferencia_id` int NOT NULL,
     `usuario_id` int NOT NULL,
-    `tipo` longtext COLLATE utf8mb4_0900_ai_ci NULL,
+    `tipo` enum('Faltante','Averia','Sobrante','Retraso') COLLATE utf8mb4_0900_ai_ci NULL,
     `cantidad_afectada` decimal(14,4) NULL,
     `observaciones` text COLLATE utf8mb4_0900_ai_ci NULL,
     `fecha` datetime NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT `PK_novedades_transferencia` PRIMARY KEY (`id`),
+    CONSTRAINT `chk_novtransf_cantidad` CHECK (`cantidad_afectada` IS NULL OR `cantidad_afectada` >= 0),
     CONSTRAINT `fk_novtransf_transferencia` FOREIGN KEY (`transferencia_id`) REFERENCES `transferencias` (`id`) ON DELETE CASCADE,
     CONSTRAINT `fk_novtransf_usuario` FOREIGN KEY (`usuario_id`) REFERENCES `usuarios` (`id`) ON DELETE RESTRICT
 ) COLLATE=utf8mb4_0900_ai_ci;
@@ -281,7 +294,7 @@ CREATE INDEX `IX_ventas_cliente_id` ON `ventas` (`cliente_id`);
 CREATE INDEX `IX_ventas_usuario_id` ON `ventas` (`usuario_id`);
 
 INSERT INTO `__EFMigrationsHistory` (`MigrationId`, `ProductVersion`)
-VALUES ('20260917005307_InitialCreate', '9.0.20');
+VALUES ('20260917010821_InitialCreate', '9.0.20');
 
 COMMIT;
 

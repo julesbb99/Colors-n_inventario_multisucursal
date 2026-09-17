@@ -87,6 +87,30 @@ public class AppDbContext : DbContext
         v => v == "urgente" ? TipoServicio.Urgente : TipoServicio.Estandar);
 
     // =========================================================================
+    // Tipos ENUM fisicos
+    //
+    // EF Core no tiene concepto de ENUM: HasConversion<string>() por si solo
+    // produce longtext (o varchar(255) si la columna esta indexada). Declarar
+    // el tipo explicito mantiene el modelo fiel al esquema real y conserva la
+    // validacion que da el propio ENUM de MySQL.
+    //
+    // El orden de los valores debe coincidir con el del DDL: MySQL guarda el
+    // indice ordinal, no el texto.
+    // =========================================================================
+    private const string EnumRolRed = "enum('Matriz','Sucursal')";
+    private const string EnumRolUsuario = "enum('Administrador General','Gerente de Sucursal','Operador')";
+    private const string EnumTipoPersona = "enum('Natural','Juridica')";
+    private const string EnumTipoServicio = "enum('urgente','estandar')";
+    private const string EnumEstadoOrdenCompra = "enum('Pendiente','Confirmada','Recibida','Cancelada')";
+    private const string EnumEstadoTransferencia =
+        "enum('Solicitada','EnPreparacion','EnTransito','RecibidaCompleta','RecibidaParcial')";
+    private const string EnumUrgencia = "enum('Baja','Media','Alta')";
+    private const string EnumTipoNovedad = "enum('Faltante','Averia','Sobrante','Retraso')";
+    private const string EnumTipoMovimiento = "enum('Ingreso','Retiro')";
+    private const string EnumMotivoMovimiento =
+        "enum('Compra','Venta','Ajuste','Transferencia','Merma','Devolucion')";
+
+    // =========================================================================
     // COMUN
     // =========================================================================
     private static void ConfigurarComun(ModelBuilder modelBuilder)
@@ -100,7 +124,8 @@ public class AppDbContext : DbContext
             e.Property(x => x.Nombre).HasColumnName("nombre").HasMaxLength(100).IsRequired();
             e.Property(x => x.Ciudad).HasColumnName("ciudad").HasMaxLength(80).IsRequired();
             e.Property(x => x.Direccion).HasColumnName("direccion").HasMaxLength(150);
-            e.Property(x => x.RolRed).HasColumnName("rol_red").HasConversion<string>().IsRequired();
+            e.Property(x => x.RolRed).HasColumnName("rol_red")
+             .HasConversion<string>().HasColumnType(EnumRolRed).IsRequired();
             e.Property(x => x.Descripcion).HasColumnName("descripcion").HasMaxLength(200);
         });
 
@@ -113,7 +138,8 @@ public class AppDbContext : DbContext
             e.Property(x => x.Nombre).HasColumnName("nombre").HasMaxLength(100).IsRequired();
             e.Property(x => x.Email).HasColumnName("email").HasMaxLength(100).IsRequired();
             e.Property(x => x.PasswordHash).HasColumnName("password_hash").HasMaxLength(255).IsRequired();
-            e.Property(x => x.Rol).HasColumnName("rol").HasConversion(RolUsuarioConverter).IsRequired();
+            e.Property(x => x.Rol).HasColumnName("rol")
+             .HasConversion(RolUsuarioConverter).HasColumnType(EnumRolUsuario).IsRequired();
             e.Property(x => x.SucursalId).HasColumnName("sucursal_id");
 
             e.HasIndex(x => x.Email).IsUnique().HasDatabaseName("uq_usuarios_email");
@@ -233,15 +259,22 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<MovimientoInventario>(e =>
         {
-            e.ToTable("movimientos_inventario");
+            e.ToTable("movimientos_inventario", t =>
+            {
+                // La cantidad se guarda siempre positiva: el signo lo da `tipo`.
+                t.HasCheckConstraint("chk_movinv_cantidad", "`cantidad` IS NULL OR `cantidad` > 0");
+                t.HasCheckConstraint("chk_movinv_cantidad_base", "`cantidad_base` IS NULL OR `cantidad_base` > 0");
+            });
             e.HasKey(x => x.Id);
 
             e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
             e.Property(x => x.SucursalId).HasColumnName("sucursal_id").IsRequired();
             e.Property(x => x.ProductoId).HasColumnName("producto_id").IsRequired();
             e.Property(x => x.UsuarioId).HasColumnName("usuario_id").IsRequired();
-            e.Property(x => x.Tipo).HasColumnName("tipo").HasConversion<string>();
-            e.Property(x => x.Motivo).HasColumnName("motivo").HasConversion<string>();
+            e.Property(x => x.Tipo).HasColumnName("tipo")
+             .HasConversion<string>().HasColumnType(EnumTipoMovimiento);
+            e.Property(x => x.Motivo).HasColumnName("motivo")
+             .HasConversion<string>().HasColumnType(EnumMotivoMovimiento);
             e.Property(x => x.Cantidad).HasColumnName("cantidad").HasPrecision(14, 4);
             e.Property(x => x.UnidadId).HasColumnName("unidad_id").IsRequired();
             e.Property(x => x.CantidadBase).HasColumnName("cantidad_base").HasPrecision(14, 4);
@@ -327,7 +360,9 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<OrdenCompra>(e =>
         {
-            e.ToTable("ordenes_compra");
+            e.ToTable("ordenes_compra", t => t.HasCheckConstraint(
+                "chk_oc_plazo_pago",
+                "`plazo_pago_dias` IS NULL OR `plazo_pago_dias` >= 0"));
             e.HasKey(x => x.Id);
 
             e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
@@ -335,7 +370,8 @@ public class AppDbContext : DbContext
             e.Property(x => x.SucursalId).HasColumnName("sucursal_id").IsRequired();
             e.Property(x => x.Fecha).HasColumnName("fecha")
              .HasColumnType("datetime").HasDefaultValueSql("CURRENT_TIMESTAMP");
-            e.Property(x => x.Estado).HasColumnName("estado").HasConversion<string>();
+            e.Property(x => x.Estado).HasColumnName("estado")
+             .HasConversion<string>().HasColumnType(EnumEstadoOrdenCompra);
             e.Property(x => x.PlazoPagoDias).HasColumnName("plazo_pago_dias");
 
             e.HasIndex(x => new { x.SucursalId, x.Fecha }).HasDatabaseName("idx_oc_sucursal_fecha");
@@ -356,7 +392,12 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<OrdenCompraDetalle>(e =>
         {
-            e.ToTable("orden_compra_detalle");
+            e.ToTable("orden_compra_detalle", t =>
+            {
+                t.HasCheckConstraint("chk_ocd_cantidad", "`cantidad` IS NULL OR `cantidad` > 0");
+                t.HasCheckConstraint("chk_ocd_precio", "`precio_unitario` IS NULL OR `precio_unitario` >= 0");
+                t.HasCheckConstraint("chk_ocd_descuento", "`descuento` >= 0 AND `descuento` <= 100");
+            });
             e.HasKey(x => x.Id);
 
             e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
@@ -400,7 +441,8 @@ public class AppDbContext : DbContext
 
             e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
             e.Property(x => x.RazonSocial).HasColumnName("razon_social").HasMaxLength(150).IsRequired();
-            e.Property(x => x.TipoPersona).HasColumnName("tipo_persona").HasConversion<string>().IsRequired();
+            e.Property(x => x.TipoPersona).HasColumnName("tipo_persona")
+             .HasConversion<string>().HasColumnType(EnumTipoPersona).IsRequired();
             e.Property(x => x.Documento).HasColumnName("documento").HasMaxLength(20).IsRequired();
             e.Property(x => x.Telefono).HasColumnName("telefono").HasMaxLength(20);
             e.Property(x => x.Email).HasColumnName("email").HasMaxLength(100);
@@ -411,7 +453,10 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<Venta>(e =>
         {
-            e.ToTable("ventas");
+            // Un total negativo indicaria una devolucion, que va por otro documento.
+            e.ToTable("ventas", t => t.HasCheckConstraint(
+                "chk_ventas_total",
+                "`total` IS NULL OR `total` >= 0"));
             e.HasKey(x => x.Id);
 
             e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
@@ -447,7 +492,12 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<VentaDetalle>(e =>
         {
-            e.ToTable("venta_detalle");
+            e.ToTable("venta_detalle", t =>
+            {
+                t.HasCheckConstraint("chk_vd_cantidad", "`cantidad` IS NULL OR `cantidad` > 0");
+                t.HasCheckConstraint("chk_vd_precio", "`precio_unitario` IS NULL OR `precio_unitario` >= 0");
+                t.HasCheckConstraint("chk_vd_descuento", "`descuento` >= 0 AND `descuento` <= 100");
+            });
             e.HasKey(x => x.Id);
 
             e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
@@ -494,12 +544,21 @@ public class AppDbContext : DbContext
             e.Property(x => x.TipoServicio)
              .HasColumnName("tipo_servicio")
              .HasConversion(TipoServicioConverter)
+             .HasColumnType(EnumTipoServicio)
              .IsRequired();
         });
 
         modelBuilder.Entity<Transferencia>(e =>
         {
-            e.ToTable("transferencias");
+            e.ToTable("transferencias", t =>
+            {
+                // Una sede no se transfiere mercancia a si misma.
+                t.HasCheckConstraint("chk_transf_sedes_distintas",
+                    "`sucursal_origen_id` <> `sucursal_destino_id`");
+                t.HasCheckConstraint("chk_transf_cantidades",
+                    "(`cantidad_solicitada` IS NULL OR `cantidad_solicitada` > 0) " +
+                    "AND (`cantidad_recibida` IS NULL OR `cantidad_recibida` >= 0)");
+            });
             e.HasKey(x => x.Id);
 
             e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
@@ -510,8 +569,10 @@ public class AppDbContext : DbContext
             e.Property(x => x.CantidadSolicitada).HasColumnName("cantidad_solicitada").HasPrecision(14, 4);
             e.Property(x => x.CantidadRecibida).HasColumnName("cantidad_recibida").HasPrecision(14, 4);
             e.Property(x => x.UnidadId).HasColumnName("unidad_id").IsRequired();
-            e.Property(x => x.Estado).HasColumnName("estado").HasConversion<string>();
-            e.Property(x => x.Urgencia).HasColumnName("urgencia").HasConversion<string>();
+            e.Property(x => x.Estado).HasColumnName("estado")
+             .HasConversion<string>().HasColumnType(EnumEstadoTransferencia);
+            e.Property(x => x.Urgencia).HasColumnName("urgencia")
+             .HasConversion<string>().HasColumnType(EnumUrgencia);
             e.Property(x => x.FechaSolicitud).HasColumnName("fecha_solicitud")
              .HasColumnType("datetime").HasDefaultValueSql("CURRENT_TIMESTAMP");
             e.Property(x => x.FechaEstimadaLlegada).HasColumnName("fecha_estimada_llegada")
@@ -553,13 +614,16 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<NovedadTransferencia>(e =>
         {
-            e.ToTable("novedades_transferencia");
+            e.ToTable("novedades_transferencia", t => t.HasCheckConstraint(
+                "chk_novtransf_cantidad",
+                "`cantidad_afectada` IS NULL OR `cantidad_afectada` >= 0"));
             e.HasKey(x => x.Id);
 
             e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
             e.Property(x => x.TransferenciaId).HasColumnName("transferencia_id").IsRequired();
             e.Property(x => x.UsuarioId).HasColumnName("usuario_id").IsRequired();
-            e.Property(x => x.Tipo).HasColumnName("tipo").HasConversion<string>();
+            e.Property(x => x.Tipo).HasColumnName("tipo")
+             .HasConversion<string>().HasColumnType(EnumTipoNovedad);
             e.Property(x => x.CantidadAfectada).HasColumnName("cantidad_afectada").HasPrecision(14, 4);
             e.Property(x => x.Observaciones).HasColumnName("observaciones").HasColumnType("text");
             e.Property(x => x.Fecha).HasColumnName("fecha")

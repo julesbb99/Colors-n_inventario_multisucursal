@@ -19,7 +19,7 @@ namespace colorsin.Infrastructure.Migrations
                     id = table.Column<int>(type: "int", nullable: false)
                         .Annotation("MySql:ValueGenerationStrategy", MySqlValueGenerationStrategy.IdentityColumn),
                     razon_social = table.Column<string>(type: "varchar(150)", maxLength: 150, nullable: false, collation: "utf8mb4_0900_ai_ci"),
-                    tipo_persona = table.Column<string>(type: "longtext", nullable: false, collation: "utf8mb4_0900_ai_ci"),
+                    tipo_persona = table.Column<string>(type: "enum('Natural','Juridica')", nullable: false, collation: "utf8mb4_0900_ai_ci"),
                     documento = table.Column<string>(type: "varchar(20)", maxLength: 20, nullable: false, collation: "utf8mb4_0900_ai_ci"),
                     telefono = table.Column<string>(type: "varchar(20)", maxLength: 20, nullable: true, collation: "utf8mb4_0900_ai_ci"),
                     email = table.Column<string>(type: "varchar(100)", maxLength: 100, nullable: true, collation: "utf8mb4_0900_ai_ci"),
@@ -56,7 +56,7 @@ namespace colorsin.Infrastructure.Migrations
                     nombre = table.Column<string>(type: "varchar(100)", maxLength: 100, nullable: false, collation: "utf8mb4_0900_ai_ci"),
                     ciudad = table.Column<string>(type: "varchar(80)", maxLength: 80, nullable: false, collation: "utf8mb4_0900_ai_ci"),
                     direccion = table.Column<string>(type: "varchar(150)", maxLength: 150, nullable: true, collation: "utf8mb4_0900_ai_ci"),
-                    rol_red = table.Column<string>(type: "longtext", nullable: false, collation: "utf8mb4_0900_ai_ci"),
+                    rol_red = table.Column<string>(type: "enum('Matriz','Sucursal')", nullable: false, collation: "utf8mb4_0900_ai_ci"),
                     descripcion = table.Column<string>(type: "varchar(200)", maxLength: 200, nullable: true, collation: "utf8mb4_0900_ai_ci")
                 },
                 constraints: table =>
@@ -72,7 +72,7 @@ namespace colorsin.Infrastructure.Migrations
                     id = table.Column<int>(type: "int", nullable: false)
                         .Annotation("MySql:ValueGenerationStrategy", MySqlValueGenerationStrategy.IdentityColumn),
                     nombre = table.Column<string>(type: "varchar(100)", maxLength: 100, nullable: false, collation: "utf8mb4_0900_ai_ci"),
-                    tipo_servicio = table.Column<string>(type: "longtext", nullable: false, collation: "utf8mb4_0900_ai_ci")
+                    tipo_servicio = table.Column<string>(type: "enum('urgente','estandar')", nullable: false, collation: "utf8mb4_0900_ai_ci")
                 },
                 constraints: table =>
                 {
@@ -105,12 +105,13 @@ namespace colorsin.Infrastructure.Migrations
                     proveedor_id = table.Column<int>(type: "int", nullable: false),
                     sucursal_id = table.Column<int>(type: "int", nullable: false),
                     fecha = table.Column<DateTime>(type: "datetime", nullable: true, defaultValueSql: "CURRENT_TIMESTAMP"),
-                    estado = table.Column<string>(type: "varchar(255)", nullable: true, collation: "utf8mb4_0900_ai_ci"),
+                    estado = table.Column<string>(type: "enum('Pendiente','Confirmada','Recibida','Cancelada')", nullable: true, collation: "utf8mb4_0900_ai_ci"),
                     plazo_pago_dias = table.Column<int>(type: "int", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ordenes_compra", x => x.id);
+                    table.CheckConstraint("chk_oc_plazo_pago", "`plazo_pago_dias` IS NULL OR `plazo_pago_dias` >= 0");
                     table.ForeignKey(
                         name: "fk_oc_proveedor",
                         column: x => x.proveedor_id,
@@ -135,7 +136,7 @@ namespace colorsin.Infrastructure.Migrations
                     nombre = table.Column<string>(type: "varchar(100)", maxLength: 100, nullable: false, collation: "utf8mb4_0900_ai_ci"),
                     email = table.Column<string>(type: "varchar(100)", maxLength: 100, nullable: false, collation: "utf8mb4_0900_ai_ci"),
                     password_hash = table.Column<string>(type: "varchar(255)", maxLength: 255, nullable: false, collation: "utf8mb4_0900_ai_ci"),
-                    rol = table.Column<string>(type: "longtext", nullable: false, collation: "utf8mb4_0900_ai_ci"),
+                    rol = table.Column<string>(type: "enum('Administrador General','Gerente de Sucursal','Operador')", nullable: false, collation: "utf8mb4_0900_ai_ci"),
                     sucursal_id = table.Column<int>(type: "int", nullable: true)
                 },
                 constraints: table =>
@@ -188,6 +189,7 @@ namespace colorsin.Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ventas", x => x.id);
+                    table.CheckConstraint("chk_ventas_total", "`total` IS NULL OR `total` >= 0");
                     table.ForeignKey(
                         name: "fk_ventas_cliente",
                         column: x => x.cliente_id,
@@ -279,8 +281,8 @@ namespace colorsin.Infrastructure.Migrations
                     sucursal_id = table.Column<int>(type: "int", nullable: false),
                     producto_id = table.Column<int>(type: "int", nullable: false),
                     usuario_id = table.Column<int>(type: "int", nullable: false),
-                    tipo = table.Column<string>(type: "longtext", nullable: true, collation: "utf8mb4_0900_ai_ci"),
-                    motivo = table.Column<string>(type: "longtext", nullable: true, collation: "utf8mb4_0900_ai_ci"),
+                    tipo = table.Column<string>(type: "enum('Ingreso','Retiro')", nullable: true, collation: "utf8mb4_0900_ai_ci"),
+                    motivo = table.Column<string>(type: "enum('Compra','Venta','Ajuste','Transferencia','Merma','Devolucion')", nullable: true, collation: "utf8mb4_0900_ai_ci"),
                     cantidad = table.Column<decimal>(type: "decimal(14,4)", precision: 14, scale: 4, nullable: true),
                     unidad_id = table.Column<int>(type: "int", nullable: false),
                     cantidad_base = table.Column<decimal>(type: "decimal(14,4)", precision: 14, scale: 4, nullable: true),
@@ -289,6 +291,8 @@ namespace colorsin.Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_movimientos_inventario", x => x.id);
+                    table.CheckConstraint("chk_movinv_cantidad", "`cantidad` IS NULL OR `cantidad` > 0");
+                    table.CheckConstraint("chk_movinv_cantidad_base", "`cantidad_base` IS NULL OR `cantidad_base` > 0");
                     table.ForeignKey(
                         name: "fk_movinv_producto",
                         column: x => x.producto_id,
@@ -332,6 +336,9 @@ namespace colorsin.Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_orden_compra_detalle", x => x.id);
+                    table.CheckConstraint("chk_ocd_cantidad", "`cantidad` IS NULL OR `cantidad` > 0");
+                    table.CheckConstraint("chk_ocd_descuento", "`descuento` >= 0 AND `descuento` <= 100");
+                    table.CheckConstraint("chk_ocd_precio", "`precio_unitario` IS NULL OR `precio_unitario` >= 0");
                     table.ForeignKey(
                         name: "fk_ocd_orden",
                         column: x => x.orden_compra_id,
@@ -394,14 +401,16 @@ namespace colorsin.Infrastructure.Migrations
                     cantidad_solicitada = table.Column<decimal>(type: "decimal(14,4)", precision: 14, scale: 4, nullable: true),
                     cantidad_recibida = table.Column<decimal>(type: "decimal(14,4)", precision: 14, scale: 4, nullable: true),
                     unidad_id = table.Column<int>(type: "int", nullable: false),
-                    estado = table.Column<string>(type: "varchar(255)", nullable: true, collation: "utf8mb4_0900_ai_ci"),
-                    urgencia = table.Column<string>(type: "longtext", nullable: true, collation: "utf8mb4_0900_ai_ci"),
+                    estado = table.Column<string>(type: "enum('Solicitada','EnPreparacion','EnTransito','RecibidaCompleta','RecibidaParcial')", nullable: true, collation: "utf8mb4_0900_ai_ci"),
+                    urgencia = table.Column<string>(type: "enum('Baja','Media','Alta')", nullable: true, collation: "utf8mb4_0900_ai_ci"),
                     fecha_solicitud = table.Column<DateTime>(type: "datetime", nullable: true, defaultValueSql: "CURRENT_TIMESTAMP"),
                     fecha_estimada_llegada = table.Column<DateTime>(type: "datetime", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_transferencias", x => x.id);
+                    table.CheckConstraint("chk_transf_cantidades", "(`cantidad_solicitada` IS NULL OR `cantidad_solicitada` > 0) AND (`cantidad_recibida` IS NULL OR `cantidad_recibida` >= 0)");
+                    table.CheckConstraint("chk_transf_sedes_distintas", "`sucursal_origen_id` <> `sucursal_destino_id`");
                     table.ForeignKey(
                         name: "fk_transf_producto",
                         column: x => x.producto_id,
@@ -451,6 +460,9 @@ namespace colorsin.Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_venta_detalle", x => x.id);
+                    table.CheckConstraint("chk_vd_cantidad", "`cantidad` IS NULL OR `cantidad` > 0");
+                    table.CheckConstraint("chk_vd_descuento", "`descuento` >= 0 AND `descuento` <= 100");
+                    table.CheckConstraint("chk_vd_precio", "`precio_unitario` IS NULL OR `precio_unitario` >= 0");
                     table.ForeignKey(
                         name: "fk_vd_producto",
                         column: x => x.producto_id,
@@ -480,7 +492,7 @@ namespace colorsin.Infrastructure.Migrations
                         .Annotation("MySql:ValueGenerationStrategy", MySqlValueGenerationStrategy.IdentityColumn),
                     transferencia_id = table.Column<int>(type: "int", nullable: false),
                     usuario_id = table.Column<int>(type: "int", nullable: false),
-                    tipo = table.Column<string>(type: "longtext", nullable: true, collation: "utf8mb4_0900_ai_ci"),
+                    tipo = table.Column<string>(type: "enum('Faltante','Averia','Sobrante','Retraso')", nullable: true, collation: "utf8mb4_0900_ai_ci"),
                     cantidad_afectada = table.Column<decimal>(type: "decimal(14,4)", precision: 14, scale: 4, nullable: true),
                     observaciones = table.Column<string>(type: "text", nullable: true, collation: "utf8mb4_0900_ai_ci"),
                     fecha = table.Column<DateTime>(type: "datetime", nullable: true, defaultValueSql: "CURRENT_TIMESTAMP")
@@ -488,6 +500,7 @@ namespace colorsin.Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_novedades_transferencia", x => x.id);
+                    table.CheckConstraint("chk_novtransf_cantidad", "`cantidad_afectada` IS NULL OR `cantidad_afectada` >= 0");
                     table.ForeignKey(
                         name: "fk_novtransf_transferencia",
                         column: x => x.transferencia_id,
