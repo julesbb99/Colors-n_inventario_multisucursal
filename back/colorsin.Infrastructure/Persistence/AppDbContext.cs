@@ -16,6 +16,19 @@ namespace Colorsin.Infrastructure.Persistence;
 /// IMPORTANTE sobre la precision decimal: cada columna se declara con la
 /// precision REAL que tiene en MySQL, no con una unica precision global. Ver
 /// la nota en <see cref="ConfigurarInventario"/> sobre FactorConversionLitros.
+///
+/// INDICES: todos llevan HasDatabaseName() explicito, incluidos los de clave
+/// foranea que EF crearia solo. No es cosmetico. EF los nombra
+/// IX_&lt;tabla&gt;_&lt;columna&gt;, pero el esquema real se creo con los scripts de
+/// infra/mysql/init, que usan el prefijo idx_ y nombres abreviados
+/// (idx_movinv_producto, idx_ocd_orden...). Mientras el modelo tuvo los nombres
+/// de EF y la base los otros, cada migracion que tocaba un indice generaba un
+/// DROP de algo inexistente, que falla con el error 1091 y deja la migracion a
+/// medias. Al declararlos, el modelo describe el esquema que de verdad hay.
+///
+/// Van declarados tambien los indices que no salen de ninguna relacion
+/// (idx_movinv_fecha, idx_ventas_fecha, idx_transf_estado...): EF no los
+/// deduce, y sin declararlos el modelo describiria solo una parte del esquema.
 /// </summary>
 public class AppDbContext : DbContext
 {
@@ -150,6 +163,12 @@ public class AppDbContext : DbContext
 
             e.HasIndex(x => x.Email).IsUnique().HasDatabaseName("uq_usuarios_email");
 
+            // Nombre explicito del indice de la clave foranea. EF lo crearia
+            // igual, pero llamandolo IX_usuarios_sucursal_id, mientras que la
+            // base -construida con los scripts de infra/mysql/init- lo tiene
+            // como idx_usuarios_sucursal. Ver la nota de INDICES arriba.
+            e.HasIndex(x => x.SucursalId).HasDatabaseName("idx_usuarios_sucursal");
+
             // Si se elimina una sucursal, sus usuarios quedan sin sede (SET NULL),
             // no se borran: el Administrador General ya vive sin sede.
             e.HasOne(x => x.Sucursal)
@@ -225,6 +244,8 @@ public class AppDbContext : DbContext
             e.Property(x => x.Descripcion).HasColumnName("descripcion").HasColumnType("text");
             e.Property(x => x.UnidadBaseId).HasColumnName("unidad_base_id");
 
+            e.HasIndex(x => x.UnidadBaseId).HasDatabaseName("idx_productos_unidad_base");
+
             e.HasOne(x => x.UnidadBase)
              .WithMany(u => u.ProductosConUnidadBase)
              .HasForeignKey(x => x.UnidadBaseId)
@@ -248,6 +269,8 @@ public class AppDbContext : DbContext
             e.HasIndex(x => new { x.SucursalId, x.ProductoId })
              .IsUnique()
              .HasDatabaseName("uq_inventario_sucursal_producto");
+
+            e.HasIndex(x => x.ProductoId).HasDatabaseName("idx_inventario_producto");
 
             e.HasOne(x => x.Sucursal)
              .WithMany(s => s.Inventarios)
@@ -281,6 +304,14 @@ public class AppDbContext : DbContext
 
             e.HasIndex(x => x.FechaVencimiento).HasDatabaseName("idx_lotes_vencimiento");
             e.HasIndex(x => x.NumeroLote).HasDatabaseName("idx_lotes_numero");
+            e.HasIndex(x => x.SucursalId).HasDatabaseName("idx_lotes_sucursal");
+
+            // Compuesto (producto, sucursal): es el filtro de la consulta FEFO.
+            // Su columna inicial cubre ademas la clave foranea de producto_id,
+            // asi que EF no crea un indice aparte para ella. La base ya lo
+            // tenia; sin declararlo aqui, el modelo y el esquema no coinciden.
+            e.HasIndex(x => new { x.ProductoId, x.SucursalId })
+             .HasDatabaseName("idx_lotes_producto_sucursal");
 
             // Un numero de lote del fabricante identifica UN lote dentro de una
             // sede: si vuelve a llegar, se le suma cantidad, no se crea otra
@@ -343,6 +374,16 @@ public class AppDbContext : DbContext
             // IX_movimientos_inventario_lote_id y desentonaria con los idx_ del
             // resto del esquema.
             e.HasIndex(x => x.LoteId).HasDatabaseName("idx_movinv_lote");
+            e.HasIndex(x => x.ProductoId).HasDatabaseName("idx_movinv_producto");
+            e.HasIndex(x => x.UsuarioId).HasDatabaseName("idx_movinv_usuario");
+            e.HasIndex(x => x.UnidadId).HasDatabaseName("idx_movinv_unidad");
+
+            // Estos dos no vienen de ninguna clave foranea: estaban en el DDL
+            // para las consultas por rango de fechas y por motivo del
+            // movimiento. Se declaran para que el modelo describa el esquema
+            // completo y no solo la parte que EF deduce de las relaciones.
+            e.HasIndex(x => x.Fecha).HasDatabaseName("idx_movinv_fecha");
+            e.HasIndex(x => x.Motivo).HasDatabaseName("idx_movinv_motivo");
 
             // Auditoria: TODAS las FK son Restrict. Nada debe poder borrar el
             // libro mayor en cascada.
@@ -410,6 +451,8 @@ public class AppDbContext : DbContext
              .IsUnique()
              .HasDatabaseName("uq_producto_proveedor");
 
+            e.HasIndex(x => x.ProveedorId).HasDatabaseName("idx_prodprov_proveedor");
+
             // Tabla de asociacion pura: si desaparece cualquiera de los dos
             // extremos, el vinculo deja de existir.
             e.HasOne(x => x.Producto)
@@ -446,6 +489,7 @@ public class AppDbContext : DbContext
             e.HasIndex(x => new { x.SucursalId, x.Fecha }).HasDatabaseName("idx_oc_sucursal_fecha");
             e.HasIndex(x => x.Estado).HasDatabaseName("idx_oc_estado");
             e.HasIndex(x => x.UsuarioId).HasDatabaseName("idx_oc_usuario");
+            e.HasIndex(x => x.ProveedorId).HasDatabaseName("idx_oc_proveedor");
 
             e.HasOne(x => x.Proveedor)
              .WithMany(p => p.OrdenesCompra)
@@ -503,6 +547,10 @@ public class AppDbContext : DbContext
             e.Property(x => x.UnidadId).HasColumnName("unidad_id").IsRequired();
             e.Property(x => x.PrecioUnitario).HasColumnName("precio_unitario").HasPrecision(12, 2);
             e.Property(x => x.Descuento).HasColumnName("descuento").HasPrecision(5, 2).HasDefaultValue(0m);
+
+            e.HasIndex(x => x.OrdenCompraId).HasDatabaseName("idx_ocd_orden");
+            e.HasIndex(x => x.ProductoId).HasDatabaseName("idx_ocd_producto");
+            e.HasIndex(x => x.UnidadId).HasDatabaseName("idx_ocd_unidad");
 
             // El detalle pertenece a su encabezado: se borra con el.
             e.HasOne(x => x.OrdenCompra)
@@ -564,6 +612,9 @@ public class AppDbContext : DbContext
             e.Property(x => x.Total).HasColumnName("total").HasPrecision(14, 2);
 
             e.HasIndex(x => new { x.SucursalId, x.Fecha }).HasDatabaseName("idx_ventas_sucursal_fecha");
+            e.HasIndex(x => x.ClienteId).HasDatabaseName("idx_ventas_cliente");
+            e.HasIndex(x => x.UsuarioId).HasDatabaseName("idx_ventas_usuario");
+            e.HasIndex(x => x.Fecha).HasDatabaseName("idx_ventas_fecha");
 
             e.HasOne(x => x.Cliente)
              .WithMany(c => c.Ventas)
@@ -604,6 +655,10 @@ public class AppDbContext : DbContext
             e.Property(x => x.UnidadId).HasColumnName("unidad_id").IsRequired();
             e.Property(x => x.PrecioUnitario).HasColumnName("precio_unitario").HasPrecision(12, 2);
             e.Property(x => x.Descuento).HasColumnName("descuento").HasPrecision(5, 2).HasDefaultValue(0m);
+
+            e.HasIndex(x => x.VentaId).HasDatabaseName("idx_vd_venta");
+            e.HasIndex(x => x.ProductoId).HasDatabaseName("idx_vd_producto");
+            e.HasIndex(x => x.UnidadId).HasDatabaseName("idx_vd_unidad");
 
             e.HasOne(x => x.Venta)
              .WithMany(v => v.Detalles)
@@ -675,6 +730,11 @@ public class AppDbContext : DbContext
              .HasColumnType("datetime");
 
             e.HasIndex(x => new { x.SucursalDestinoId, x.Estado }).HasDatabaseName("idx_transf_destino_estado");
+            e.HasIndex(x => x.ProductoId).HasDatabaseName("idx_transf_producto");
+            e.HasIndex(x => x.SucursalOrigenId).HasDatabaseName("idx_transf_origen");
+            e.HasIndex(x => x.TransportadoraId).HasDatabaseName("idx_transf_transportadora");
+            e.HasIndex(x => x.UnidadId).HasDatabaseName("idx_transf_unidad");
+            e.HasIndex(x => x.Estado).HasDatabaseName("idx_transf_estado");
 
             e.HasOne(x => x.Producto)
              .WithMany(p => p.Transferencias)
@@ -724,6 +784,10 @@ public class AppDbContext : DbContext
             e.Property(x => x.Observaciones).HasColumnName("observaciones").HasColumnType("text");
             e.Property(x => x.Fecha).HasColumnName("fecha")
              .HasColumnType("datetime").HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            e.HasIndex(x => x.TransferenciaId).HasDatabaseName("idx_novtransf_transferencia");
+            e.HasIndex(x => x.UsuarioId).HasDatabaseName("idx_novtransf_usuario");
+            e.HasIndex(x => x.Tipo).HasDatabaseName("idx_novtransf_tipo");
 
             // La novedad pertenece al traslado, pero conserva a su reportante.
             e.HasOne(x => x.Transferencia)

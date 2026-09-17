@@ -24,14 +24,24 @@ USE `colorsin_inventario`;
 --
 --    ON DELETE RESTRICT en ambas FK: un producto o una sede con saldo no se
 --    borran. En inventario los productos se desactivan, no se eliminan.
+--
+--    ESCALA (14,4), NO (12,1). Los 4 decimales no son adorno: un galon son
+--    3.785410 L, asi que 10 galones entran como 37.8541 L. Con un solo decimal
+--    eso se guardaria como 37.9 y el saldo se desviaria en cada movimiento,
+--    hasta que el libro mayor dejara de reconstruirlo.
+--
+--    Es ademas la escala que usan `movimientos_inventario.cantidad_base` y
+--    `lotes.cantidad_base`, que se suman y se comparan contra estas columnas.
+--    Con escalas distintas, la suma de los lotes de un producto dejaria de
+--    cuadrar con su saldo consolidado.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `inventario_sucursal` (
   `id`             INT           NOT NULL AUTO_INCREMENT,
   `sucursal_id`    INT           NOT NULL,
   `producto_id`    INT           NOT NULL,
-  `cantidad_base`  DECIMAL(12,1) NOT NULL DEFAULT 0,
-  `stock_minimo`   DECIMAL(12,1) NOT NULL DEFAULT 0,
-  `costo_promedio` DECIMAL(12,1) NOT NULL DEFAULT 0,
+  `cantidad_base`  DECIMAL(14,4) NOT NULL DEFAULT 0,
+  `stock_minimo`   DECIMAL(14,4) NOT NULL DEFAULT 0,
+  `costo_promedio` DECIMAL(14,4) NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_inventario_sucursal_producto` (`sucursal_id`, `producto_id`),
   KEY `idx_inventario_producto` (`producto_id`),

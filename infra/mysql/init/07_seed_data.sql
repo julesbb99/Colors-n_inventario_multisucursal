@@ -2,8 +2,19 @@
 -- Colorsin S.A.S. - Inventario
 -- SEED 01: Datos iniciales de prueba
 --
--- Poblacion base de la red: 3 sedes, 3 unidades de medida, 3 productos,
--- 2 proveedores, 2 transportadoras, 9 saldos de inventario y 11 lotes.
+-- Poblacion base de la red: 3 sedes, 3 unidades de medida, 5 usuarios,
+-- 2 proveedores, 3 clientes, 3 productos, 2 transportadoras, 9 saldos de
+-- inventario y 11 lotes.
+--
+-- ORDEN DE LAS SECCIONES
+--   Sigue las dependencias de clave foranea, agrupado por modulo:
+--     Comun (unidades, sucursales, usuarios)
+--       -> Compras (proveedores)
+--       -> Ventas (clientes)
+--       -> Inventario (productos, transportadoras, vinculos, saldos, lotes)
+--   `usuarios` va despues de `sucursales` porque la referencia; `productos`
+--   despues de `unidades_medida`; `inventario_sucursal` y `lotes` al final
+--   porque dependen de sedes y productos.
 --
 -- UNIDAD DE ALMACENAMIENTO: LITRO.
 --   Todo `cantidad_base`, `stock_minimo` y `costo_promedio` esta expresado en
@@ -19,6 +30,10 @@ USE `colorsin_inventario`;
 SET NAMES utf8mb4;
 
 START TRANSACTION;
+
+-- =============================================================================
+-- PASO 1 - MODULO COMUN
+-- =============================================================================
 
 -- -----------------------------------------------------------------------------
 -- 1. UNIDADES DE MEDIDA
@@ -58,9 +73,121 @@ ON DUPLICATE KEY UPDATE
 
 
 -- -----------------------------------------------------------------------------
--- 3. PRODUCTOS
+-- 3. USUARIOS
+--
+--    Los tres roles quedan representados, que es lo que hace falta para probar
+--    la trazabilidad de `usuario_id` en movimientos_inventario, ordenes_compra,
+--    ventas y auditoria_eventos: esas cuatro tablas tienen FK obligatoria a
+--    esta, asi que sin usuarios no se puede registrar NADA.
+--
+--    Reparto por sede, pensado para poder probar el filtro por sucursal:
+--      Cali      -> 1 gerente + 1 operador
+--      Armenia   -> 1 gerente
+--      Manizales -> 1 operador
+--
+--    `sucursal_id` NULO en el Administrador General: no pertenece a una sede
+--    concreta, manda sobre toda la red. La columna es nullable justamente por
+--    este caso.
+--
+--    ATENCION CON LA CONTRASENA
+--    `password_hash` NO lleva un hash real: lleva un texto marcado que no
+--    corresponde a ninguna contrasena y que ningun verificador va a aceptar.
+--    Es deliberado. Sembrar credenciales que funcionan deja cinco cuentas con
+--    clave conocida en cualquier entorno donde se corra este script, incluido
+--    uno que termine expuesto.
+--
+--    Consecuencia: estas cuentas NO pueden iniciar sesion. Hay que generar el
+--    hash real (BCrypt o Argon2) al montar la autenticacion. Y ojo, el
+--    verificador debe tolerar un hash con formato invalido sin reventar:
+--    BCrypt.Net lanza SaltParseException ante una cadena que no es un hash, y
+--    eso saldria como error 500 en vez de como credenciales incorrectas.
+-- -----------------------------------------------------------------------------
+INSERT INTO `usuarios` (`id`, `nombre`, `email`, `password_hash`, `rol`, `sucursal_id`) VALUES
+  (1, 'Marcela Ospina Rivera',  'marcela.ospina@colorsin.com.co',
+      'SIN_HASH__SEMBRADO__DEFINIR_ANTES_DE_HABILITAR_LOGIN', 'Administrador General', NULL),
+  (2, 'Julián Restrepo Cano',   'julian.restrepo@colorsin.com.co',
+      'SIN_HASH__SEMBRADO__DEFINIR_ANTES_DE_HABILITAR_LOGIN', 'Gerente de Sucursal',   1),
+  (3, 'Diana Carvajal Londoño', 'diana.carvajal@colorsin.com.co',
+      'SIN_HASH__SEMBRADO__DEFINIR_ANTES_DE_HABILITAR_LOGIN', 'Gerente de Sucursal',   2),
+  (4, 'Héctor Zapata Muñoz',    'hector.zapata@colorsin.com.co',
+      'SIN_HASH__SEMBRADO__DEFINIR_ANTES_DE_HABILITAR_LOGIN', 'Operador',              1),
+  (5, 'Paola Guerrero Salas',   'paola.guerrero@colorsin.com.co',
+      'SIN_HASH__SEMBRADO__DEFINIR_ANTES_DE_HABILITAR_LOGIN', 'Operador',              3)
+AS nuevo
+ON DUPLICATE KEY UPDATE
+  `nombre`      = nuevo.`nombre`,
+  `email`       = nuevo.`email`,
+  `rol`         = nuevo.`rol`,
+  `sucursal_id` = nuevo.`sucursal_id`;
+  -- `password_hash` queda FUERA del UPDATE a proposito: si alguien ya definio
+  -- la clave real de un usuario, volver a correr el seed no debe borrarsela.
+
+
+-- =============================================================================
+-- PASO 2 - MODULO COMPRAS
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- 4. PROVEEDORES
+--    Necesarios para poder crear ordenes de compra: `ordenes_compra` tiene FK
+--    a esta tabla.
+-- -----------------------------------------------------------------------------
+INSERT INTO `proveedores` (`id`, `nombre`, `contacto`, `telefono`) VALUES
+  (1, 'Pinturas y Resinas de Colombia',   'Laura Méndez',   '6017894522'),
+  (2, 'Solventes Petroquímicos del Neusa','Andrés Beltrán', '6015213398')
+AS nuevo
+ON DUPLICATE KEY UPDATE
+  `nombre`   = nuevo.`nombre`,
+  `contacto` = nuevo.`contacto`,
+  `telefono` = nuevo.`telefono`;
+
+
+-- =============================================================================
+-- PASO 3 - MODULO VENTAS
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- 5. CLIENTES
+--    Necesarios para poder registrar ventas: `ventas` tiene FK a esta tabla.
+--
+--    `documento` es UNICO (uq_clientes_documento): NIT con digito de
+--    verificacion en las personas juridicas, cedula en la natural. Mezclar los
+--    dos formatos a proposito, para que las validaciones que se escriban
+--    despues se topen con los dos casos.
+-- -----------------------------------------------------------------------------
+INSERT INTO `clientes`
+  (`id`, `razon_social`, `tipo_persona`, `documento`, `telefono`, `email`, `direccion`) VALUES
+  (1, 'Constructora Andina del Pacífico S.A.S.', 'Juridica', '901345678-2',
+      '6024412200', 'compras@andinapacifico.com.co',
+      'Calle 5 # 38-115, Oficina 802, Cali'),
+  (2, 'Ferretería La Herramienta Ltda.',         'Juridica', '890912345-7',
+      '6067451188', 'pedidos@laherramienta.com.co',
+      'Carrera 23 # 18-44, Manizales'),
+  (3, 'Wilson Andrés Corrales Pineda',           'Natural',  '1094567821',
+      '3156678990', 'wacorrales@gmail.com',
+      'Carrera 14 # 9-27, Barrio La Castellana, Armenia')
+AS nuevo
+ON DUPLICATE KEY UPDATE
+  `razon_social` = nuevo.`razon_social`,
+  `tipo_persona` = nuevo.`tipo_persona`,
+  `documento`    = nuevo.`documento`,
+  `telefono`     = nuevo.`telefono`,
+  `email`        = nuevo.`email`,
+  `direccion`    = nuevo.`direccion`;
+
+
+-- =============================================================================
+-- PASO 4 - MODULO INVENTARIO
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- 6. PRODUCTOS
 --    `unidad_base_id` = 1 (Litro) en los tres: es la unidad en la que se lleva
 --    el stock. Ver la nota sobre galones al final de este archivo.
+--
+--    OJO: `stock_minimo` NO vive aqui. Es una columna de `inventario_sucursal`
+--    (seccion 9), porque el umbral de reposicion es por SEDE: Cali y Manizales
+--    pueden tener minimos distintos del mismo producto.
 -- -----------------------------------------------------------------------------
 INSERT INTO `productos` (`id`, `nombre`, `categoria`, `descripcion`, `unidad_base_id`) VALUES
   (1, 'Pintura Epóxica Industrial', 'Recubrimiento',
@@ -81,20 +208,7 @@ ON DUPLICATE KEY UPDATE
 
 
 -- -----------------------------------------------------------------------------
--- 4. PROVEEDORES
--- -----------------------------------------------------------------------------
-INSERT INTO `proveedores` (`id`, `nombre`, `contacto`, `telefono`) VALUES
-  (1, 'Pinturas y Resinas de Colombia',   'Laura Méndez',   '6017894522'),
-  (2, 'Solventes Petroquímicos del Neusa','Andrés Beltrán', '6015213398')
-AS nuevo
-ON DUPLICATE KEY UPDATE
-  `nombre`   = nuevo.`nombre`,
-  `contacto` = nuevo.`contacto`,
-  `telefono` = nuevo.`telefono`;
-
-
--- -----------------------------------------------------------------------------
--- 5. TRANSPORTADORAS
+-- 7. TRANSPORTADORAS
 --    Los valores del ENUM son 'urgente' y 'estandar' en minuscula, tal como
 --    quedaron definidos en el DDL.
 -- -----------------------------------------------------------------------------
@@ -108,7 +222,7 @@ ON DUPLICATE KEY UPDATE
 
 
 -- -----------------------------------------------------------------------------
--- 6. VINCULO PRODUCTO - PROVEEDOR
+-- 8. VINCULO PRODUCTO - PROVEEDOR
 --    Quien surte que. Precio de referencia por LITRO, coherente con el
 --    costo_promedio del inventario.
 -- -----------------------------------------------------------------------------
@@ -124,9 +238,10 @@ ON DUPLICATE KEY UPDATE
 
 
 -- -----------------------------------------------------------------------------
--- 7. INVENTARIO INICIAL POR SUCURSAL
---    Todo en LITROS. Tres situaciones deliberadamente distintas para poder
---    probar las alertas de stock:
+-- 9. INVENTARIO INICIAL POR SUCURSAL
+--    Todo en LITROS. Aqui vive `stock_minimo`, el umbral de reposicion por
+--    sede. Tres situaciones deliberadamente distintas para poder probar las
+--    alertas de stock:
 --      * Cali      -> por encima del minimo en los tres productos.
 --      * Armenia   -> por DEBAJO del minimo en los tres (227.1<380, 38<150, 204.4<300).
 --      * Manizales -> Pintura Epóxica AGOTADA (0.0), Thinner sobre el minimo,
@@ -154,7 +269,7 @@ ON DUPLICATE KEY UPDATE
 
 
 -- -----------------------------------------------------------------------------
--- 8. LOTES
+-- 10. LOTES
 --    Trazabilidad del saldo anterior. La suma de los lotes de cada pareja
 --    (producto, sucursal) CUADRA con `inventario_sucursal.cantidad_base`.
 --
