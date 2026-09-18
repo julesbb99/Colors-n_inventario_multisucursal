@@ -106,9 +106,10 @@ public sealed class VentasService : IVentasService
 
     public async Task<VentaRegistradaDto> RegistrarVentaAsync(
         CrearVentaDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken = default)
     {
-        ValidarForma(peticion);
+        ValidarForma(peticion, usuarioId);
 
         // El cliente se comprueba antes de abrir la transaccion: la FK lo
         // impondria igual, pero como DbUpdateException al guardar, que llega al
@@ -120,7 +121,7 @@ public sealed class VentasService : IVentasService
         }
 
         return await _ventas.EjecutarEnTransaccionAsync(
-            ct => RegistrarEnTransaccionAsync(peticion, ct),
+            ct => RegistrarEnTransaccionAsync(peticion, usuarioId, ct),
             cancellationToken);
     }
 
@@ -128,17 +129,17 @@ public sealed class VentasService : IVentasService
     /// Validaciones que no necesitan tocar la base. Se hacen antes de abrir la
     /// transaccion para no mantenerla abierta mientras se revisa lo obvio.
     /// </summary>
-    private static void ValidarForma(CrearVentaDto peticion)
+    private static void ValidarForma(CrearVentaDto peticion, int usuarioId)
     {
         if (peticion.Lineas is null || peticion.Lineas.Count == 0)
         {
             throw new VentaInvalidaException("La venta debe tener al menos una linea.");
         }
 
-        if (peticion.UsuarioId <= 0)
+        if (usuarioId <= 0)
         {
             throw new VentaInvalidaException(
-                $"Hay que indicar el usuario que registra la venta; llego {peticion.UsuarioId}.");
+                $"Hay que indicar el usuario que registra la venta; llego {usuarioId}.");
         }
 
         for (var i = 0; i < peticion.Lineas.Count; i++)
@@ -191,6 +192,7 @@ public sealed class VentasService : IVentasService
 
     private async Task<VentaRegistradaDto> RegistrarEnTransaccionAsync(
         CrearVentaDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken)
     {
         // --- 1. Convertir cada linea a unidad base -------------------------------
@@ -256,7 +258,7 @@ public sealed class VentasService : IVentasService
         {
             ClienteId = peticion.ClienteId,
             SucursalId = peticion.SucursalId,
-            UsuarioId = peticion.UsuarioId,
+            UsuarioId = usuarioId,
             Total = total
             // Fecha la pone la base con CURRENT_TIMESTAMP: en un libro de
             // ventas todas las marcas de tiempo deben venir del mismo reloj.
@@ -289,7 +291,7 @@ public sealed class VentasService : IVentasService
                 {
                     SucursalId = peticion.SucursalId,
                     ProductoId = preparada.Producto.Id,
-                    UsuarioId = peticion.UsuarioId,
+                    UsuarioId = usuarioId,
                     // El ENUM de la base es enum('Ingreso','Retiro'): no existe
                     // el valor 'Salida'. Una salida por venta es un Retiro con
                     // motivo Venta.
@@ -339,7 +341,7 @@ public sealed class VentasService : IVentasService
         await _auditoria.RegistrarEventoAsync(
             Modulo,
             "RegistrarVenta",
-            peticion.UsuarioId,
+            usuarioId,
             ConstruirDetalleAuditoria(venta, total, lineasVendidas, saldosAfectados),
             cancellationToken);
 

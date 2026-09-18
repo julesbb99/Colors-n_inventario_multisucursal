@@ -6,11 +6,12 @@ namespace Colorsin.Application.Transferencias.DTOs;
 /// En una sola transaccion sube el saldo del destino, recrea alli los lotes que
 /// salieron del origen -con su mismo numero y vencimiento-, anexa un movimiento
 /// de Ingreso/Transferencia por cada lote y cierra el traslado.
+///
+/// NO LLEVA UsuarioId, a proposito: quien recibe es un parametro del metodo y
+/// sale del token. Es el tercero de los tres responsables del ciclo, y el unico
+/// que esta fisicamente en la sede destino.
 /// </summary>
 /// <param name="TransferenciaId">Traslado a recibir. Debe estar 'EnTransito'.</param>
-/// <param name="UsuarioId">
-/// Quien recibe. Queda en cada movimiento de inventario y en la auditoria.
-/// </param>
 /// <param name="CantidadRecibida">
 /// Lo que llego, en la unidad del traslado.
 ///
@@ -26,6 +27,5 @@ namespace Colorsin.Application.Transferencias.DTOs;
 /// <param name="Observaciones">Nota que se copia a cada movimiento generado.</param>
 public sealed record RecibirTransferenciaDto(
     int TransferenciaId,
-    int UsuarioId,
     decimal? CantidadRecibida = null,
     string? Observaciones = null);

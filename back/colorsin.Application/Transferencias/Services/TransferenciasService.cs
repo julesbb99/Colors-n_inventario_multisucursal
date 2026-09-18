@@ -97,13 +97,14 @@ public sealed class TransferenciasService : ITransferenciasService
 
     public async Task<ResultadoTransferencia> CrearAsync(
         CrearTransferenciaDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken = default)
     {
-        if (peticion.UsuarioId <= 0)
+        if (usuarioId <= 0)
         {
             return ResultadoTransferencia.Fallo(
                 ErrorTransferencia.UsuarioNoIndicado,
-                $"Hay que indicar el usuario que solicita el traslado; llego {peticion.UsuarioId}.");
+                $"Hay que indicar el usuario que solicita el traslado; llego {usuarioId}.");
         }
 
         if (peticion.Cantidad <= 0m)
@@ -147,7 +148,7 @@ public sealed class TransferenciasService : ITransferenciasService
             ProductoId = peticion.ProductoId,
             SucursalOrigenId = peticion.SucursalOrigenId,
             SucursalDestinoId = peticion.SucursalDestinoId,
-            UsuarioId = peticion.UsuarioId,
+            UsuarioId = usuarioId,
             // Transportadora y guia van nulas: se asignan al despachar.
             CantidadSolicitada = peticion.Cantidad,
             UnidadId = peticion.UnidadId,
@@ -162,7 +163,7 @@ public sealed class TransferenciasService : ITransferenciasService
             await _transferencias.GuardarCambiosAsync(ct);
 
             await _auditoria.RegistrarEventoAsync(
-                Modulo, "SolicitarTransferencia", peticion.UsuarioId,
+                Modulo, "SolicitarTransferencia", usuarioId,
                 $"transferencia={transferencia.Id} | producto={peticion.ProductoId} " +
                 $"('{producto.Nombre}') | origen={peticion.SucursalOrigenId} | " +
                 $"destino={peticion.SucursalDestinoId} | " +
@@ -186,13 +187,14 @@ public sealed class TransferenciasService : ITransferenciasService
 
     public async Task<ResultadoTransferencia> DespacharAsync(
         DespacharTransferenciaDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken = default)
     {
-        if (peticion.UsuarioId <= 0)
+        if (usuarioId <= 0)
         {
             return ResultadoTransferencia.Fallo(
                 ErrorTransferencia.UsuarioNoIndicado,
-                $"Hay que indicar el usuario que despacha; llego {peticion.UsuarioId}.");
+                $"Hay que indicar el usuario que despacha; llego {usuarioId}.");
         }
 
         if (string.IsNullOrWhiteSpace(peticion.Guia))
@@ -211,12 +213,13 @@ public sealed class TransferenciasService : ITransferenciasService
         }
 
         return await _transferencias.EjecutarEnTransaccionAsync(
-            ct => DespacharEnTransaccionAsync(peticion, ct),
+            ct => DespacharEnTransaccionAsync(peticion, usuarioId, ct),
             cancellationToken);
     }
 
     private async Task<ResultadoTransferencia> DespacharEnTransaccionAsync(
         DespacharTransferenciaDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken)
     {
         // Fila bloqueada: dos despachos simultaneos del mismo traslado no pueden
@@ -300,7 +303,7 @@ public sealed class TransferenciasService : ITransferenciasService
             {
                 SucursalId = transferencia.SucursalOrigenId,
                 ProductoId = transferencia.ProductoId,
-                UsuarioId = peticion.UsuarioId,
+                UsuarioId = usuarioId,
                 // El ENUM de la base es enum('Ingreso','Retiro'): no existe el
                 // valor 'Salida'. Una salida por traslado es un Retiro con
                 // motivo Transferencia.
@@ -329,7 +332,7 @@ public sealed class TransferenciasService : ITransferenciasService
         await _transferencias.GuardarCambiosAsync(cancellationToken);
 
         await _auditoria.RegistrarEventoAsync(
-            Modulo, "DespacharTransferencia", peticion.UsuarioId,
+            Modulo, "DespacharTransferencia", usuarioId,
             $"transferencia={transferencia.Id} | estado=Solicitada->EnTransito | " +
             $"origen={transferencia.SucursalOrigenId} | producto={transferencia.ProductoId} | " +
             $"cantidadBase=-{Num(cantidadBase)} | saldo={Num(saldoResultante)} | " +
@@ -352,13 +355,14 @@ public sealed class TransferenciasService : ITransferenciasService
 
     public async Task<ResultadoTransferencia> RecibirAsync(
         RecibirTransferenciaDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken = default)
     {
-        if (peticion.UsuarioId <= 0)
+        if (usuarioId <= 0)
         {
             return ResultadoTransferencia.Fallo(
                 ErrorTransferencia.UsuarioNoIndicado,
-                $"Hay que indicar el usuario que recibe; llego {peticion.UsuarioId}.");
+                $"Hay que indicar el usuario que recibe; llego {usuarioId}.");
         }
 
         if (peticion.CantidadRecibida is <= 0m)
@@ -371,12 +375,13 @@ public sealed class TransferenciasService : ITransferenciasService
         }
 
         return await _transferencias.EjecutarEnTransaccionAsync(
-            ct => RecibirEnTransaccionAsync(peticion, ct),
+            ct => RecibirEnTransaccionAsync(peticion, usuarioId, ct),
             cancellationToken);
     }
 
     private async Task<ResultadoTransferencia> RecibirEnTransaccionAsync(
         RecibirTransferenciaDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken)
     {
         var transferencia = await _transferencias.ObtenerParaOperarAsync(
@@ -475,7 +480,7 @@ public sealed class TransferenciasService : ITransferenciasService
             {
                 SucursalId = transferencia.SucursalDestinoId,
                 ProductoId = transferencia.ProductoId,
-                UsuarioId = peticion.UsuarioId,
+                UsuarioId = usuarioId,
                 Tipo = TipoMovimiento.Ingreso,
                 Motivo = MotivoMovimiento.Transferencia,
                 Cantidad = ProporcionEnUnidadTraslado(deEsteLote, recibidaBase, recibida),
@@ -512,7 +517,7 @@ public sealed class TransferenciasService : ITransferenciasService
         var faltante = solicitada - recibida;
 
         await _auditoria.RegistrarEventoAsync(
-            Modulo, "RecibirTransferencia", peticion.UsuarioId,
+            Modulo, "RecibirTransferencia", usuarioId,
             $"transferencia={transferencia.Id} | estado=EnTransito->{estadoNuevo} | " +
             $"destino={transferencia.SucursalDestinoId} | producto={transferencia.ProductoId} | " +
             $"solicitada={Num(solicitada)} recibida={Num(recibida)} " +
@@ -620,13 +625,14 @@ public sealed class TransferenciasService : ITransferenciasService
 
     public async Task<ResultadoNovedad> RegistrarNovedadAsync(
         RegistrarNovedadDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken = default)
     {
-        if (peticion.UsuarioId <= 0)
+        if (usuarioId <= 0)
         {
             return ResultadoNovedad.Fallo(
                 ErrorTransferencia.UsuarioNoIndicado,
-                $"Hay que indicar el usuario que reporta; llego {peticion.UsuarioId}.");
+                $"Hay que indicar el usuario que reporta; llego {usuarioId}.");
         }
 
         // El CHECK `chk_novtransf_cantidad` solo exige que no sea negativa.
@@ -657,7 +663,7 @@ public sealed class TransferenciasService : ITransferenciasService
             var novedad = new NovedadTransferencia
             {
                 TransferenciaId = peticion.TransferenciaId,
-                UsuarioId = peticion.UsuarioId,
+                UsuarioId = usuarioId,
                 Tipo = peticion.Tipo,
                 CantidadAfectada = peticion.CantidadAfectada,
                 Observaciones = peticion.Observaciones
@@ -668,7 +674,7 @@ public sealed class TransferenciasService : ITransferenciasService
             await _transferencias.GuardarCambiosAsync(ct);
 
             await _auditoria.RegistrarEventoAsync(
-                Modulo, "RegistrarNovedadTransferencia", peticion.UsuarioId,
+                Modulo, "RegistrarNovedadTransferencia", usuarioId,
                 $"novedad={novedad.Id} | transferencia={peticion.TransferenciaId} | " +
                 $"tipo={peticion.Tipo} | " +
                 $"cantidadAfectada={(peticion.CantidadAfectada is null ? "(sin indicar)" : Num(peticion.CantidadAfectada.Value))} | " +

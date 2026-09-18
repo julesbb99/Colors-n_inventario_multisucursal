@@ -8,12 +8,11 @@ namespace Colorsin.Application.Transferencias.DTOs;
 /// sus lotes por FEFO, anexa un movimiento de Retiro/Transferencia al libro
 /// mayor por cada lote consumido, asigna transportadora y guia, y pasa el
 /// traslado a 'EnTransito'.
+///
+/// NO LLEVA UsuarioId, a proposito: quien despacha es un parametro del metodo y
+/// sale del token de esta peticion, que es distinta de la que creo el traslado.
 /// </summary>
 /// <param name="TransferenciaId">Traslado a despachar. Debe estar 'Solicitada'.</param>
-/// <param name="UsuarioId">
-/// Quien despacha. Queda en cada movimiento de inventario y en la auditoria, y
-/// debe existir en `usuarios`: las dos tablas tienen FK obligatoria.
-/// </param>
 /// <param name="TransportadoraId">Quien lleva la carga. Debe existir en `transportadoras`.</param>
 /// <param name="Guia">
 /// Numero de guia del transportador, maximo 50 caracteres. Es con lo que se
@@ -23,7 +22,6 @@ namespace Colorsin.Application.Transferencias.DTOs;
 /// <param name="Observaciones">Nota que se copia a cada movimiento generado.</param>
 public sealed record DespacharTransferenciaDto(
     int TransferenciaId,
-    int UsuarioId,
     int TransportadoraId,
     string Guia,
     DateTime? FechaEstimadaLlegada = null,

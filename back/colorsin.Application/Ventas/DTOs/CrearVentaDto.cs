@@ -6,23 +6,22 @@ namespace Colorsin.Application.Ventas.DTOs;
 /// Una venta se crea ya concretada: no hay estado intermedio. En el momento en
 /// que se registra se descuenta el stock de la sede, se descuentan los lotes y
 /// se anexan los movimientos al libro mayor, todo en una transaccion.
+///
+/// NO LLEVA UsuarioId, a proposito. Quien vende es un parametro del metodo y
+/// sale del token, no del cuerpo del JSON. Una venta registrada a nombre de otro
+/// no es solo un rastro falso: es la comision, el cuadre de caja y la
+/// responsabilidad sobre el stock que salio, todo apuntando a quien no fue.
 /// </summary>
 /// <param name="ClienteId">A quien se le vende.</param>
 /// <param name="SucursalId">
 /// Sede que despacha. Es la sede de cuyo saldo se descuenta, y contra la que se
 /// valida el stock disponible.
 /// </param>
-/// <param name="UsuarioId">
-/// Quien registra la venta. Queda en `ventas.usuario_id`, en cada movimiento de
-/// inventario y en la auditoria. Debe existir en `usuarios`: las tres tablas
-/// tienen FK obligatoria.
-/// </param>
 /// <param name="Lineas">Lineas de la venta. Debe traer al menos una.</param>
 /// <param name="Observaciones">Nota que se copia a cada movimiento generado.</param>
 public sealed record CrearVentaDto(
     int ClienteId,
     int SucursalId,
-    int UsuarioId,
     IReadOnlyList<CrearLineaVentaDto> Lineas,
     string? Observaciones = null);
 

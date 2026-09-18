@@ -1,3 +1,4 @@
+using Colorsin.Application.Comun.Auth;
 using Colorsin.Application.Dashboard.DTOs;
 using Colorsin.Application.Dashboard.Repositories;
 using Colorsin.Domain.Transferencias;
@@ -21,6 +22,17 @@ namespace Colorsin.Application.Dashboard.Services;
 /// NO ESCRIBE AUDITORIA. Consultar un tablero no es un hecho que haya que
 /// rastrear, y un evento por cada refresco llenaria `auditoria_eventos` de ruido
 /// que le quita valor a lo que si importa rastrear.
+///
+/// EL AISLAMIENTO ENTRE SEDES SE APLICA AQUI, no en los endpoints. Los cuatro
+/// metodos empiezan igual: pasan el `sucursalId` que llego por
+/// <see cref="IUsuarioContexto.ResolverFiltroSucursal"/> y usan lo que ese
+/// metodo devuelve, nunca el parametro original.
+///
+/// Podria haberse hecho en la capa HTTP, pero entonces la garantia duraria
+/// hasta el primer endpoint que se escribiera sin acordarse. Aqui no hay forma
+/// de consultar el tablero sin pasar por la regla: quien llame al servicio, la
+/// cumple. El precio es que este servicio ya no se puede usar fuera de una
+/// peticion autenticada, lo cual es exactamente lo que se quiere de un tablero.
 public sealed class DashboardService : IDashboardService
 {
     // Topes duros de los parametros. Sin ellos, un `top` descuidado se trae el
@@ -34,10 +46,12 @@ public sealed class DashboardService : IDashboardService
     private const int DecimalesMoneda = 2;
 
     private readonly IDashboardRepository _repositorio;
+    private readonly IUsuarioContexto _contexto;
 
-    public DashboardService(IDashboardRepository repositorio)
+    public DashboardService(IDashboardRepository repositorio, IUsuarioContexto contexto)
     {
         _repositorio = repositorio;
+        _contexto = contexto;
     }
 
     // =========================================================================
@@ -49,6 +63,10 @@ public sealed class DashboardService : IDashboardService
         DateOnly? fechaCorte = null,
         CancellationToken cancellationToken = default)
     {
+        // Aislamiento entre sedes. Desde aqui se usa `sede`, NUNCA `sucursalId`:
+        // para un gerente o un operador los dos valores no coinciden.
+        var sede = _contexto.ResolverFiltroSucursal(sucursalId);
+
         var corte = fechaCorte ?? HoyLocal();
 
         // El dia va como [00:00 del corte, 00:00 del dia siguiente): `ventas.fecha`
@@ -61,25 +79,27 @@ public sealed class DashboardService : IDashboardService
         var inicioDelMes = new DateOnly(corte.Year, corte.Month, 1)
             .ToDateTime(TimeOnly.MinValue);
 
-        var nombreSucursal = await ResolverNombreSucursalAsync(sucursalId, cancellationToken);
+        var nombreSucursal = await ResolverNombreSucursalAsync(sede, cancellationToken);
 
         var ventasDelDia = await _repositorio.ObtenerResumenVentasAsync(
-            sucursalId, inicioDelDia, finExclusivo, cancellationToken);
+            sede, inicioDelDia, finExclusivo, cancellationToken);
 
         var ventasDelMes = await _repositorio.ObtenerResumenVentasAsync(
-            sucursalId, inicioDelMes, finExclusivo, cancellationToken);
+            sede, inicioDelMes, finExclusivo, cancellationToken);
 
         // De esta unica consulta salen tres cifras del resumen: litros, saldos
         // sin convertir y alertas. Ver la nota de IDashboardRepository sobre por
         // que no hay un metodo por cada una.
         var stock = await _repositorio.ObtenerStockPorSucursalAsync(
-            sucursalId, cancellationToken);
+            sede, cancellationToken);
 
         var estados = await _repositorio.ObtenerConteoTransferenciasAsync(
-            sucursalId, cancellationToken);
+            sede, cancellationToken);
 
         return new ResumenGeneralDto(
-            sucursalId,
+            // La sede EFECTIVA, no la pedida: asi un gerente que no mando nada
+            // ve en la respuesta cual es el alcance real de lo que esta mirando.
+            sede,
             nombreSucursal,
             corte,
             ventasDelDia.Total,
@@ -104,7 +124,11 @@ public sealed class DashboardService : IDashboardService
         int top = 5,
         CancellationToken cancellationToken = default)
     {
-        var nombreSucursal = await ResolverNombreSucursalAsync(sucursalId, cancellationToken);
+        // Se resuelve ANTES de mirar el rango, para que un rango invalido no se
+        // convierta en una forma de saltarse la comprobacion de sede.
+        var sede = _contexto.ResolverFiltroSucursal(sucursalId);
+
+        var nombreSucursal = await ResolverNombreSucursalAsync(sede, cancellationToken);
 
         // Rango al reves: es un error de quien llama, no un fallo del sistema.
         // Se responde vacio en vez de lanzar, y sin ir a la base: ninguna de las
@@ -112,7 +136,7 @@ public sealed class DashboardService : IDashboardService
         if (hasta < desde)
         {
             return new MetricasVentasDto(
-                desde, hasta, sucursalId, nombreSucursal,
+                desde, hasta, sede, nombreSucursal,
                 CantidadVentas: 0,
                 TotalVendido: 0m,
                 TicketPromedio: 0m,
@@ -127,16 +151,16 @@ public sealed class DashboardService : IDashboardService
         var hastaExclusivo = hasta.AddDays(1).ToDateTime(TimeOnly.MinValue);
 
         var resumen = await _repositorio.ObtenerResumenVentasAsync(
-            sucursalId, desdeInclusivo, hastaExclusivo, cancellationToken);
+            sede, desdeInclusivo, hastaExclusivo, cancellationToken);
 
         var serie = await _repositorio.ObtenerVentasPorDiaAsync(
-            sucursalId, desdeInclusivo, hastaExclusivo, cancellationToken);
+            sede, desdeInclusivo, hastaExclusivo, cancellationToken);
 
         var productos = await _repositorio.ObtenerProductosMasVendidosAsync(
-            sucursalId, desdeInclusivo, hastaExclusivo, topAcotado, cancellationToken);
+            sede, desdeInclusivo, hastaExclusivo, topAcotado, cancellationToken);
 
         var clientes = await _repositorio.ObtenerTopClientesAsync(
-            sucursalId, desdeInclusivo, hastaExclusivo, topAcotado, cancellationToken);
+            sede, desdeInclusivo, hastaExclusivo, topAcotado, cancellationToken);
 
         // Sin ventas el promedio es cero, no una division por cero. Se calcula
         // aqui para que ninguna pantalla tenga que acordarse de protegerlo.
@@ -150,7 +174,7 @@ public sealed class DashboardService : IDashboardService
         return new MetricasVentasDto(
             desde,
             hasta,
-            sucursalId,
+            sede,
             nombreSucursal,
             resumen.Cantidad,
             resumen.Total,
@@ -171,6 +195,8 @@ public sealed class DashboardService : IDashboardService
         int topMovimientos = 10,
         CancellationToken cancellationToken = default)
     {
+        var sede = _contexto.ResolverFiltroSucursal(sucursalId);
+
         var horizonte = Acotar(diasHorizonteVencimiento, HorizonteMinimo, HorizonteMaximo);
 
         // Aqui SI se lee el reloj, a diferencia del resumen general, que recibe
@@ -179,25 +205,25 @@ public sealed class DashboardService : IDashboardService
         // "cuanto se vendio" si se puede preguntar de un dia pasado.
         var hoy = HoyLocal();
 
-        var nombreSucursal = await ResolverNombreSucursalAsync(sucursalId, cancellationToken);
+        var nombreSucursal = await ResolverNombreSucursalAsync(sede, cancellationToken);
 
         var stock = await _repositorio.ObtenerStockPorSucursalAsync(
-            sucursalId, cancellationToken);
+            sede, cancellationToken);
 
         var lotes = await _repositorio.ObtenerLotesProximosAVencerAsync(
-            sucursalId,
+            sede,
             hoy,
             hoy.AddDays(horizonte),
             Acotar(topLotes, TopMinimo, TopMaximo),
             cancellationToken);
 
         var movimientos = await _repositorio.ObtenerMovimientosRecientesAsync(
-            sucursalId,
+            sede,
             Acotar(topMovimientos, TopMinimo, TopMaximo),
             cancellationToken);
 
         return new MetricasInventarioDto(
-            sucursalId,
+            sede,
             // Del catalogo de sedes, no de `stock`: una sede sin ninguna fila de
             // inventario no sale en esa lista y se quedaria sin nombre.
             nombreSucursal,
@@ -219,18 +245,20 @@ public sealed class DashboardService : IDashboardService
         int topNovedades = 10,
         CancellationToken cancellationToken = default)
     {
-        var nombreSucursal = await ResolverNombreSucursalAsync(sucursalId, cancellationToken);
+        var sede = _contexto.ResolverFiltroSucursal(sucursalId);
+
+        var nombreSucursal = await ResolverNombreSucursalAsync(sede, cancellationToken);
 
         var conteos = await _repositorio.ObtenerConteoTransferenciasAsync(
-            sucursalId, cancellationToken);
+            sede, cancellationToken);
 
         var novedades = await _repositorio.ObtenerNovedadesRecientesAsync(
-            sucursalId,
+            sede,
             Acotar(topNovedades, TopMinimo, TopMaximo),
             cancellationToken);
 
         return new MetricasTransferenciasDto(
-            sucursalId,
+            sede,
             nombreSucursal,
             // El total sale de sumar lo que vino, no de sumar los siete
             // contadores. Asi, si algun dia se agrega un estado al enum y se

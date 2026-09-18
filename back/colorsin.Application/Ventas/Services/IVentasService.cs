@@ -51,7 +51,16 @@ public interface IVentasService
     /// interes es <see cref="StockInsuficienteException"/>, que lleva el
     /// disponible y el solicitado como propiedades.
     /// </summary>
+    /// <param name="peticion">Cliente, sede y lineas de la venta.</param>
+    /// <param name="usuarioId">
+    /// Quien registra la venta. Va como PARAMETRO y no dentro de
+    /// <paramref name="peticion"/> porque el DTO lo escribe el cliente: aqui debe
+    /// llegar <c>IUsuarioContexto.UsuarioIdRequerido()</c>, que sale del token.
+    /// De este id cuelgan la comision, el cuadre de caja y la responsabilidad
+    /// sobre el stock que salio.
+    /// </param>
     Task<VentaRegistradaDto> RegistrarVentaAsync(
         CrearVentaDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken = default);
 }

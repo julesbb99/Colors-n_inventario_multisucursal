@@ -14,12 +14,13 @@ namespace Colorsin.Application.Transferencias.DTOs;
 ///
 /// Se puede registrar en cualquier estado, incluso despues de cerrado: los
 /// danos se descubren al abrir las cajas, no en el andén.
+///
+/// NO LLEVA UsuarioId, a proposito: quien reporta es un parametro del metodo y
+/// sale del token. Una novedad puede acabar en un reclamo a la transportadora,
+/// y entonces quien la firmo importa de verdad; que lo pusiera el cliente en el
+/// cuerpo del JSON la dejaria sin valor como evidencia.
 /// </summary>
 /// <param name="TransferenciaId">Traslado sobre el que se reporta.</param>
-/// <param name="UsuarioId">
-/// Quien reporta. Queda en `novedades_transferencia.usuario_id`, que tiene FK
-/// obligatoria: una novedad sin responsable no sirve para reclamar.
-/// </param>
 /// <param name="Tipo">'Faltante', 'Averia', 'Sobrante' o 'Retraso'.</param>
 /// <param name="CantidadAfectada">
 /// Cuanto producto involucra, en la unidad del traslado. Opcional e informativa:
@@ -29,7 +30,6 @@ namespace Colorsin.Application.Transferencias.DTOs;
 /// <param name="Observaciones">Descripcion del hallazgo.</param>
 public sealed record RegistrarNovedadDto(
     int TransferenciaId,
-    int UsuarioId,
     TipoNovedad Tipo,
     decimal? CantidadAfectada = null,
     string? Observaciones = null);

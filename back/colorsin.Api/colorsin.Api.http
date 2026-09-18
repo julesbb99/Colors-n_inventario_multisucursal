@@ -1,7 +1,17 @@
 @host = http://localhost:5121
 
-### Conexion con MySQL y conteo de las tablas base
+# =============================================================================
+# TODO EXIGE TOKEN salvo POST /api/auth/login.
+# Ejecuta primero el login de mas abajo: guarda el token en {{token}} y el resto
+# de peticiones lo usan. Sin el, la respuesta es 401.
+#
+# El login esta limitado a 5 intentos por minuto y por IP. Si te pasas, sale un
+# 429 con la cabecera Retry-After diciendo cuantos segundos esperar.
+# =============================================================================
+
+### Conexion con MySQL y conteo de las tablas base (exige token)
 GET {{host}}/health/db
+Authorization: Bearer {{token}}
 Accept: application/json
 
 
@@ -73,63 +83,93 @@ Accept: application/json
 GET {{host}}/api/auth/yo
 Accept: application/json
 
+### Limite de intentos: corre esta seis veces seguidas. La sexta da 429.
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "nadie@colorsin.com.co",
+  "password": "da-igual"
+}
+
 
 # =============================================================================
 # DASHBOARD
 #
-# Todo es de solo lectura. Los parametros son opcionales: sin ninguno, cada
-# endpoint responde por toda la red.
+# Solo lectura, y todo exige token.
+#
+# LO QUE VES DEPENDE DE QUIEN SEAS:
+#   AdminGeneral                 sin sucursalId ve toda la red; con sucursalId,
+#                                la sede que pida.
+#   GerenteSucursal / Operador   siempre su propia sede. Omitir el parametro NO
+#                                da acceso a la red: se acota a la suya. Pedir
+#                                otra sede responde 403.
+#
+# Para verlo: entra como admin y corre las de abajo; entra luego como Diana
+# (sede 2) y corre las mismas. Las que llevan sucursalId=1 le daran 403.
 # =============================================================================
 
-### Resumen general - toda la red
+### Resumen general - alcance segun el token
 GET {{host}}/api/dashboard/resumen
+Authorization: Bearer {{token}}
 Accept: application/json
 
-### Resumen general - solo la matriz de Cali
+### Resumen general - sede 1 (403 si tu token no es de la sede 1 ni de admin)
 GET {{host}}/api/dashboard/resumen?sucursalId=1
+Authorization: Bearer {{token}}
 Accept: application/json
 
 ### Resumen general - cierre de un dia pasado
 GET {{host}}/api/dashboard/resumen?fechaCorte=2026-09-15
+Authorization: Bearer {{token}}
 Accept: application/json
 
 
 ### Ventas - mes en curso (sin fechas, toma el mes actual)
 GET {{host}}/api/dashboard/ventas
+Authorization: Bearer {{token}}
 Accept: application/json
 
 ### Ventas - rango explicito, las dos fechas incluidas
 GET {{host}}/api/dashboard/ventas?desde=2026-09-01&hasta=2026-09-30
-Accept: application/json
-
-### Ventas - una sede, con rankings de 3
-GET {{host}}/api/dashboard/ventas?desde=2026-09-01&hasta=2026-09-30&sucursalId=1&top=3
+Authorization: Bearer {{token}}
 Accept: application/json
 
 ### Ventas - rango al reves: responde en ceros, no con error
 GET {{host}}/api/dashboard/ventas?desde=2026-09-30&hasta=2026-09-01
+Authorization: Bearer {{token}}
 Accept: application/json
 
 
-### Inventario - toda la red, vencimientos a 30 dias
+### Inventario - vencimientos a 30 dias
 GET {{host}}/api/dashboard/inventario
+Authorization: Bearer {{token}}
 Accept: application/json
 
 ### Inventario - horizonte de un ano y mas lotes
 GET {{host}}/api/dashboard/inventario?dias=365&topLotes=20
+Authorization: Bearer {{token}}
 Accept: application/json
 
-### Inventario - una sede, con los ultimos 5 movimientos
+### Inventario - sede 2, con los ultimos 5 movimientos
 GET {{host}}/api/dashboard/inventario?sucursalId=2&topMovimientos=5
+Authorization: Bearer {{token}}
 Accept: application/json
 
 
-### Transferencias - toda la red
+### Transferencias
 GET {{host}}/api/dashboard/transferencias
+Authorization: Bearer {{token}}
 Accept: application/json
 
-### Transferencias - una sede (cuenta si es origen O destino)
+### Transferencias - sede 2 (cuenta si es origen O destino)
 GET {{host}}/api/dashboard/transferencias?sucursalId=2&topNovedades=5
+Authorization: Bearer {{token}}
+Accept: application/json
+
+
+### Sin token -> 401
+GET {{host}}/api/dashboard/resumen
 Accept: application/json
 
 

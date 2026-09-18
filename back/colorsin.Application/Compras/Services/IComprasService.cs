@@ -41,8 +41,16 @@ public interface IComprasService
     /// No lanza excepciones por reglas de negocio. Revisa
     /// <see cref="ResultadoOrdenCompra.Exito"/>.
     /// </summary>
+    /// <param name="peticion">Proveedor, sede y lineas de la orden.</param>
+    /// <param name="usuarioId">
+    /// Quien crea la orden. Va como PARAMETRO y no dentro de
+    /// <paramref name="peticion"/> porque el DTO es lo que se deserializa del
+    /// cuerpo de la peticion HTTP: aqui debe llegar
+    /// <c>IUsuarioContexto.UsuarioIdRequerido()</c>, que sale del token.
+    /// </param>
     Task<ResultadoOrdenCompra> CrearOrdenAsync(
         CrearOrdenCompraDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -58,7 +66,13 @@ public interface IComprasService
     /// No lanza excepciones por reglas de negocio. Revisa
     /// <see cref="ResultadoRecepcion.Exito"/>.
     /// </summary>
+    /// <param name="peticion">Orden que se recibe y que llego en esta entrega.</param>
+    /// <param name="usuarioId">
+    /// Quien recibe. Del token, no del DTO: queda en cada movimiento de
+    /// inventario, y esta es la operacion que mueve stock de verdad.
+    /// </param>
     Task<ResultadoRecepcion> ConfirmarRecepcionAsync(
         ConfirmarRecepcionDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken = default);
 }

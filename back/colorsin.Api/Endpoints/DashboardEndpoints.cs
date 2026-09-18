@@ -34,7 +34,14 @@ public static class DashboardEndpoints
     {
         var grupo = rutas
             .MapGroup("/api/dashboard")
-            .WithTags("Dashboard");
+            .WithTags("Dashboard")
+            // En el GRUPO, no endpoint por endpoint: asi un endpoint nuevo nace
+            // protegido y no hay que acordarse de nada. Sin token, 401.
+            //
+            // Esto controla QUIEN entra. Lo que cada quien puede VER lo decide el
+            // aislamiento por sede, y ese no vive aqui sino en DashboardService,
+            // para que no dependa de que la capa HTTP se acuerde de aplicarlo.
+            .RequireAuthorization();
 
         // ---------------------------------------------------------------------
         // Resumen general

@@ -99,6 +99,7 @@ public sealed class ComprasService : IComprasService
 
     public async Task<ResultadoOrdenCompra> CrearOrdenAsync(
         CrearOrdenCompraDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken = default)
     {
         // --- 1. Validaciones de forma ------------------------------------------
@@ -109,12 +110,12 @@ public sealed class ComprasService : IComprasService
                 "La orden debe tener al menos una linea.");
         }
 
-        if (peticion.UsuarioId <= 0)
+        if (usuarioId <= 0)
         {
             return ResultadoOrdenCompra.Fallo(
                 ErrorCompra.UsuarioNoIndicado,
                 "Hay que indicar el usuario que crea la orden; " +
-                $"llego {peticion.UsuarioId}.");
+                $"llego {usuarioId}.");
         }
 
         if (peticion.PlazoPagoDias is < 0)
@@ -170,7 +171,7 @@ public sealed class ComprasService : IComprasService
         {
             ProveedorId = peticion.ProveedorId,
             SucursalId = peticion.SucursalId,
-            UsuarioId = peticion.UsuarioId,
+            UsuarioId = usuarioId,
             // El estado NO lo elige quien llama: una orden recien creada no
             // puede nacer 'Recibida' y saltarse el ingreso al stock.
             Estado = EstadoOrdenCompra.Pendiente,
@@ -204,7 +205,7 @@ public sealed class ComprasService : IComprasService
             await _auditoria.RegistrarEventoAsync(
                 Modulo,
                 "CrearOrdenCompra",
-                peticion.UsuarioId,
+                usuarioId,
                 $"orden={orden.Id} | proveedor={peticion.ProveedorId} | " +
                 $"sucursal={peticion.SucursalId} | lineas={peticion.Lineas.Count} | " +
                 $"total={Num(total)} | estado=Pendiente",
@@ -222,13 +223,14 @@ public sealed class ComprasService : IComprasService
 
     public async Task<ResultadoRecepcion> ConfirmarRecepcionAsync(
         ConfirmarRecepcionDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken = default)
     {
-        if (peticion.UsuarioId <= 0)
+        if (usuarioId <= 0)
         {
             return ResultadoRecepcion.Fallo(
                 ErrorCompra.UsuarioNoIndicado,
-                $"Hay que indicar el usuario que recibe; llego {peticion.UsuarioId}.");
+                $"Hay que indicar el usuario que recibe; llego {usuarioId}.");
         }
 
         var lineas = peticion.Lineas ?? [];
@@ -258,12 +260,13 @@ public sealed class ComprasService : IComprasService
         }
 
         return await _inventario.EjecutarEnTransaccionAsync(
-            ct => RecibirEnTransaccionAsync(peticion, lineas, ct),
+            ct => RecibirEnTransaccionAsync(peticion, usuarioId, lineas, ct),
             cancellationToken);
     }
 
     private async Task<ResultadoRecepcion> RecibirEnTransaccionAsync(
         ConfirmarRecepcionDto peticion,
+        int usuarioId,
         IReadOnlyList<LineaRecepcionDto> lineas,
         CancellationToken cancellationToken)
     {
@@ -370,7 +373,7 @@ public sealed class ComprasService : IComprasService
             {
                 SucursalId = orden.SucursalId,
                 ProductoId = detalle.ProductoId,
-                UsuarioId = peticion.UsuarioId,
+                UsuarioId = usuarioId,
                 Tipo = TipoMovimiento.Ingreso,
                 Motivo = MotivoMovimiento.Compra,
                 // Lo de ESTA entrega, no lo pedido en la linea. En una entrega
@@ -430,7 +433,7 @@ public sealed class ComprasService : IComprasService
         await _auditoria.RegistrarEventoAsync(
             Modulo,
             todoCompleto ? "ConfirmarRecepcionCompra" : "RecepcionParcialCompra",
-            peticion.UsuarioId,
+            usuarioId,
             ConstruirDetalleAuditoria(orden, estadoNuevo, resultado),
             cancellationToken);
 

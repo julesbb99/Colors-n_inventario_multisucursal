@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Colorsin.Api.Auth;
 using Colorsin.Application.Comun.Auth;
 using Colorsin.Application.Comun.DTOs.Auth;
 using Colorsin.Application.Comun.Services;
@@ -55,7 +56,11 @@ public static class AuthEndpoints
             // Explicito aunque hoy nada esta protegido por defecto: si manana se
             // exige token en toda la API, este endpoint no puede quedar dentro,
             // o nadie podria conseguir el primero.
-            .AllowAnonymous();
+            .AllowAnonymous()
+            // Limite de intentos por IP. Es el unico endpoint que lo lleva, y es
+            // el unico que lo necesita: el resto exige un token, que ya hay que
+            // haber conseguido por aqui.
+            .RequireRateLimiting(PoliticasRateLimit.Login);
 
         // ---------------------------------------------------------------------
         // Quien soy

@@ -30,8 +30,18 @@ public interface ITransferenciasService
     /// Solicita un traslado. Nace 'Solicitada' y NO mueve stock ni lo reserva:
     /// las existencias se validan y se descuentan al despachar.
     /// </summary>
+    /// <param name="peticion">Producto, sedes y cantidad.</param>
+    /// <param name="usuarioId">
+    /// Quien SOLICITA. Va como PARAMETRO y no dentro de
+    /// <paramref name="peticion"/>: sale del token, no del cuerpo del JSON.
+    ///
+    /// Los tres responsables del ciclo -pide, despacha, recibe- se toman cada uno
+    /// del token de SU propia peticion. Eso es lo que hace que de verdad sean
+    /// distinguibles y no tres copias del mismo id que mando un cliente.
+    /// </param>
     Task<ResultadoTransferencia> CrearAsync(
         CrearTransferenciaDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -43,8 +53,11 @@ public interface ITransferenciasService
     /// transportadora y guia, y pasa el traslado a 'EnTransito'. O queda todo,
     /// o no queda nada.
     /// </summary>
+    /// <param name="peticion">Traslado, transportadora y guia.</param>
+    /// <param name="usuarioId">Quien despacha, del token. Queda en cada movimiento de Retiro.</param>
     Task<ResultadoTransferencia> DespacharAsync(
         DespacharTransferenciaDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -55,8 +68,11 @@ public interface ITransferenciasService
     /// movimiento de Ingreso/Transferencia por cada uno y cierra el traslado
     /// como 'Completada' o 'RecibidaParcial' segun lo que haya llegado.
     /// </summary>
+    /// <param name="peticion">Traslado y lo que llego.</param>
+    /// <param name="usuarioId">Quien recibe, del token. Queda en cada movimiento de Ingreso.</param>
     Task<ResultadoTransferencia> RecibirAsync(
         RecibirTransferenciaDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -84,7 +100,13 @@ public interface ITransferenciasService
     /// cambia el estado: se puede registrar en cualquier momento, incluso
     /// despues de cerrado.
     /// </summary>
+    /// <param name="peticion">Traslado, tipo de novedad y descripcion.</param>
+    /// <param name="usuarioId">
+    /// Quien reporta, del token. Una novedad puede acabar en un reclamo a la
+    /// transportadora, y entonces quien la firmo es justamente lo que se alega.
+    /// </param>
     Task<ResultadoNovedad> RegistrarNovedadAsync(
         RegistrarNovedadDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken = default);
 }

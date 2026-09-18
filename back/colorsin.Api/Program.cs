@@ -1,7 +1,11 @@
+using System.Globalization;
 using System.Security.Claims;
 using System.Text;
+using System.Threading.RateLimiting;
+using Colorsin.Api.Auth;
 using Colorsin.Api.Endpoints;
 using Colorsin.Application.Comun.Auditoria;
+using Colorsin.Application.Comun.Auth;
 using Colorsin.Application.Comun.Repositories;
 using Colorsin.Application.Comun.Services;
 using Colorsin.Application.Compras.Repositories;
@@ -23,6 +27,7 @@ using Colorsin.Infrastructure.Persistence.Repositories.Transferencias;
 using Colorsin.Infrastructure.Persistence.Repositories.Ventas;
 using Colorsin.Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
@@ -249,6 +254,94 @@ builder.Services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
 // sesion y la posible actualizacion del hash se confirmen en el mismo guardado.
 builder.Services.AddScoped<IAuthService, AuthService>();
 
+// -----------------------------------------------------------------------------
+// Contexto del usuario: quien hace la peticion, leido del token.
+//
+// AddHttpContextAccessor es lo que permite a UsuarioContextoHttp llegar al
+// usuario sin que los servicios tengan que recibirlo por parametro desde el
+// endpoint. Scoped porque la respuesta cambia en cada peticion: un singleton
+// devolveria el usuario de la primera para siempre.
+// -----------------------------------------------------------------------------
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IUsuarioContexto, UsuarioContextoHttp>();
+
+// Traduce AccesoDenegadoException a un 403 con un mensaje generico, en vez de
+// dejarla salir como un 500 con la traza -y el detalle interno- dentro.
+builder.Services.AddExceptionHandler<AccesoDenegadoHandler>();
+builder.Services.AddProblemDetails();
+
+// -----------------------------------------------------------------------------
+// Limitacion de peticiones al inicio de sesion.
+//
+// POR QUE SOLO AHI. Es el unico endpoint al que se puede llamar sin token, y por
+// tanto el unico donde alguien puede probar combinaciones sin identificarse. Los
+// 500 ms que cuesta BCrypt encarecen el ataque pero no lo impiden: sin limite,
+// una tarde entera de intentos sigue siendo gratis.
+//
+// VENTANA FIJA de 5 intentos por minuto y por IP. Fija y no deslizante porque es
+// la que se puede explicar sin ambiguedad -"cinco por minuto"- y porque el peor
+// caso de la ventana fija, diez intentos a caballo de dos ventanas, es
+// irrelevante frente a los millones que busca un ataque por fuerza bruta.
+//
+// SIN COLA (QueueLimit = 0): el sexto intento se rechaza en el acto en vez de
+// esperar turno. Encolarlos ataria hilos del servidor a peticiones que de todas
+// formas van a fallar, que es precisamente lo que busca quien ataca.
+//
+// LO QUE NO CUBRE: la particion es por IP, asi que un ataque repartido entre
+// muchas IP pasa por debajo, y varias personas detras de la misma salida a
+// internet comparten cupo. Ver la nota de la cabecera X-Forwarded-For abajo.
+// -----------------------------------------------------------------------------
+builder.Services.AddRateLimiter(opciones =>
+{
+    // Por defecto un rechazo sale como 503 ("servicio no disponible"), que dice
+    // que el servidor tiene un problema. No lo tiene: esta negando a proposito.
+    // 429 es el codigo que significa "vas demasiado rapido".
+    opciones.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    opciones.AddPolicy(PoliticasRateLimit.Login, contexto =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            // La IP como clave de particion. Si no se puede determinar -pasa con
+            // algunas conexiones locales- todas esas peticiones caen en la misma
+            // particion "desconocida", que es el lado prudente del error: comparten
+            // cupo en vez de quedarse sin limite.
+            partitionKey: contexto.Connection.RemoteIpAddress?.ToString() ?? "desconocida",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            }));
+
+    // Retry-After: sin ella, el cliente no sabe cuanto esperar y reintenta a
+    // ciegas, sumando peticiones al problema.
+    opciones.OnRejected = async (contexto, cancelacion) =>
+    {
+        if (contexto.Lease.TryGetMetadata(MetadataName.RetryAfter, out var espera))
+        {
+            contexto.HttpContext.Response.Headers.RetryAfter =
+                ((int)espera.TotalSeconds).ToString(CultureInfo.InvariantCulture);
+        }
+
+        contexto.HttpContext.RequestServices
+            .GetRequiredService<ILoggerFactory>()
+            .CreateLogger("RateLimit")
+            .LogWarning(
+                "Limite de intentos alcanzado en {Ruta} desde {Ip}.",
+                contexto.HttpContext.Request.Path,
+                contexto.HttpContext.Connection.RemoteIpAddress);
+
+        await contexto.HttpContext.Response.WriteAsJsonAsync(
+            new
+            {
+                title = "Demasiados intentos",
+                status = StatusCodes.Status429TooManyRequests,
+                detail = "Has superado el limite de intentos. Espera un momento y vuelve a intentarlo."
+            },
+            cancelacion);
+    };
+});
+
 const string PoliticaCors = "FrontendColorsin";
 
 var origenesPermitidos = (builder.Configuration
@@ -278,7 +371,17 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+// Primero de todo, para que envuelva al resto: lo que lance cualquier middleware
+// posterior pasa por aqui. Es lo que convierte AccesoDenegadoException en 403.
+app.UseExceptionHandler();
+
 app.UseHttpsRedirection();
+
+// Explicito, aunque WebApplication lo insertaria solo. Hace falta ANTES del
+// limitador y de la autorizacion porque los dos deciden mirando los metadatos
+// del endpoint -que politica de limite lleva, si exige token-, y esos metadatos
+// no existen hasta que el enrutamiento resuelve a que endpoint va la peticion.
+app.UseRouting();
 
 // -----------------------------------------------------------------------------
 // CORS, despues de UseHttpsRedirection y antes de las rutas.
@@ -328,6 +431,16 @@ else
 // mientras no lleve [Authorize] o .RequireAuthorization(). De momento lo son
 // todos.
 // -----------------------------------------------------------------------------
+// El limitador va DESPUES de CORS y ANTES de la autenticacion.
+//
+//   Despues de CORS, porque si no un rechazo 429 saldria sin cabeceras CORS y el
+//   navegador se lo mostraria al usuario como un error de CORS, escondiendo el
+//   mensaje de "demasiados intentos" que si le sirve.
+//
+//   Antes de la autenticacion, para descartar el exceso cuanto antes: comprobar
+//   una contrasena cuesta medio segundo, y quien abusa no deberia poder gastarlo.
+app.UseRateLimiter();
+
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -350,7 +463,15 @@ app.MapGet("/health/db", async (AppDbContext db) =>
         lotes = await db.Lotes.CountAsync()
     });
 })
-.WithName("HealthDb");
+.WithName("HealthDb")
+// Tambien exige token, aunque no sea un "grupo de endpoints" como los otros.
+// No es solo un pulso de vida: devuelve cuantas sedes, productos y lotes hay, y
+// eso es informacion del negocio que no tiene por que estar abierta.
+//
+// Si algun dia hace falta un pulso para un monitor externo, lo correcto es un
+// endpoint aparte que responda solo si la base contesta, sin ninguna cifra, y
+// ese si puede ir publico.
+.RequireAuthorization();
 
 // -----------------------------------------------------------------------------
 // Endpoints del tablero: /api/dashboard/*

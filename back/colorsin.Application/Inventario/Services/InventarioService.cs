@@ -83,6 +83,7 @@ public sealed class InventarioService : IInventarioService
 
     public async Task<ResultadoMovimiento> RegistrarMovimientoAsync(
         RegistrarMovimientoDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken = default)
     {
         // --- 1. Validaciones que no tocan la base ------------------------------
@@ -130,12 +131,13 @@ public sealed class InventarioService : IInventarioService
         // las validaciones pasan: asi una regla de negocio incumplida sale con
         // la transaccion limpia, sin nada que revertir.
         return await _inventario.EjecutarEnTransaccionAsync(
-            ct => RegistrarEnTransaccionAsync(peticion, producto, cantidadBase, ct),
+            ct => RegistrarEnTransaccionAsync(peticion, usuarioId, producto, cantidadBase, ct),
             cancellationToken);
     }
 
     private async Task<ResultadoMovimiento> RegistrarEnTransaccionAsync(
         RegistrarMovimientoDto peticion,
+        int usuarioId,
         Producto producto,
         decimal cantidadBase,
         CancellationToken cancellationToken)
@@ -232,7 +234,7 @@ public sealed class InventarioService : IInventarioService
         {
             SucursalId = peticion.SucursalId,
             ProductoId = peticion.ProductoId,
-            UsuarioId = peticion.UsuarioId,
+            UsuarioId = usuarioId,
             Tipo = peticion.TipoMovimiento,
             Motivo = peticion.Motivo,
             Cantidad = peticion.Cantidad,
@@ -254,7 +256,7 @@ public sealed class InventarioService : IInventarioService
         await _auditoria.RegistrarEventoAsync(
             Modulo,
             lote is null ? "RegistrarMovimiento" : "RegistrarMovimientoConLote",
-            peticion.UsuarioId,
+            usuarioId,
             ConstruirDetalle(peticion, producto.Nombre, cantidadBase, saldoResultante, lote),
             cancellationToken);
 

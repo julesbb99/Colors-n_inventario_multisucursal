@@ -10,12 +10,13 @@ namespace Colorsin.Application.Compras.DTOs;
 /// Admite entregas parciales y se puede llamar varias veces sobre la misma
 /// orden. Cada llamada ACUMULA sobre lo ya recibido; cuando todas las lineas
 /// completan lo pedido, la orden pasa a 'Recibida' y deja de admitir mas.
+///
+/// NO LLEVA UsuarioId, a proposito: quien recibe es un parametro del metodo y
+/// sale del token. Aqui importa el doble, porque esta es la operacion que mueve
+/// stock de verdad: quien firmo una entrada de mercancia tiene que ser quien
+/// realmente estaba en la bodega.
 /// </summary>
 /// <param name="OrdenCompraId">Orden que se recibe.</param>
-/// <param name="UsuarioId">
-/// Quien recibe. Queda en cada movimiento de inventario y en la auditoria, y
-/// debe existir en `usuarios`: las dos tablas tienen FK obligatoria.
-/// </param>
 /// <param name="Lineas">
 /// Que llego en esta entrega.
 ///
@@ -27,7 +28,6 @@ namespace Colorsin.Application.Compras.DTOs;
 /// <param name="Observaciones">Nota que se copia a cada movimiento generado.</param>
 public sealed record ConfirmarRecepcionDto(
     int OrdenCompraId,
-    int UsuarioId,
     IReadOnlyList<LineaRecepcionDto>? Lineas = null,
     string? Observaciones = null);
 

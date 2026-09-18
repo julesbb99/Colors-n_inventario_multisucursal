@@ -45,7 +45,19 @@ public interface IInventarioService
     /// No lanza excepciones por reglas de negocio. Revisa
     /// <see cref="ResultadoMovimiento.Exito"/>.
     /// </summary>
+    /// <param name="peticion">Que se mueve, de donde y cuanto.</param>
+    /// <param name="usuarioId">
+    /// Responsable del movimiento. Queda en el libro mayor y en la auditoria.
+    ///
+    /// Va como PARAMETRO y no dentro de <paramref name="peticion"/> porque el DTO
+    /// es lo que se deserializa del cuerpo de la peticion HTTP, o sea lo que
+    /// escribe el cliente. Aqui debe llegar
+    /// <c>IUsuarioContexto.UsuarioIdRequerido()</c>, que sale del token firmado
+    /// por el servidor. Con el id en el DTO, cualquiera podria imputar un
+    /// movimiento a nombre de otro.
+    /// </param>
     Task<ResultadoMovimiento> RegistrarMovimientoAsync(
         RegistrarMovimientoDto peticion,
+        int usuarioId,
         CancellationToken cancellationToken = default);
 }

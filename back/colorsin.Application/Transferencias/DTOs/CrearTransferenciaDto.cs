@@ -9,20 +9,17 @@ namespace Colorsin.Application.Transferencias.DTOs;
 /// existencias solo cambian al despachar, y no se reserva nada mientras tanto,
 /// asi que el stock puede haberse agotado cuando llegue el momento. La
 /// validacion de disponibilidad va en el despacho, no aqui.
+///
+/// NO LLEVA UsuarioId, a proposito: quien solicita es un parametro del metodo y
+/// sale del token. Ojo con no confundir los tres responsables del ciclo -pide,
+/// despacha, recibe-: cada uno se toma del token de SU propia peticion, que es
+/// lo que hace que los tres sean de verdad distinguibles.
 /// </summary>
 /// <param name="ProductoId">Producto a trasladar.</param>
 /// <param name="SucursalOrigenId">Sede que despacha, de cuyo stock saldra.</param>
 /// <param name="SucursalDestinoId">
 /// Sede que recibe. Debe ser distinta del origen; tambien lo exige el CHECK
 /// `chk_transf_sedes_distintas`.
-/// </param>
-/// <param name="UsuarioId">
-/// Quien solicita. Obligatorio: se guarda en `transferencias.usuario_id` y
-/// ademas queda en el evento de auditoria. Debe existir en `usuarios`; la FK
-/// `fk_transf_usuario` lo impone.
-///
-/// Es el que PIDE el producto. Quien despacha y quien recibe se registran
-/// aparte, en los movimientos de inventario de cada paso.
 /// </param>
 /// <param name="Cantidad">
 /// Cantidad a trasladar, en <paramref name="UnidadId"/>. Debe ser mayor que
@@ -37,7 +34,6 @@ public sealed record CrearTransferenciaDto(
     int ProductoId,
     int SucursalOrigenId,
     int SucursalDestinoId,
-    int UsuarioId,
     decimal Cantidad,
     int UnidadId,
     Urgencia Urgencia = Urgencia.Media);

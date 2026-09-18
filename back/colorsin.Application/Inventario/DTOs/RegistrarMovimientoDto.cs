@@ -10,10 +10,15 @@ namespace Colorsin.Application.Inventario.DTOs;
 /// la unidad base del producto; no hay que convertir antes de llamar. Pedir la
 /// cantidad ya convertida seria trasladar al operario la aritmetica que causa
 /// los errores que este modulo existe para evitar.
+///
+/// NO LLEVA UsuarioId, a proposito. El responsable es un parametro del metodo y
+/// sale del token de quien hace la peticion. Si viniera en este DTO, viajaria en
+/// el cuerpo del JSON, que lo escribe el cliente: cualquiera podria imputar un
+/// movimiento a nombre de otro, y la bitacora dejaria de servir justo para lo
+/// unico que existe. El token lo firma el servidor.
 /// </summary>
 /// <param name="SucursalId">Sede donde ocurre el movimiento.</param>
 /// <param name="ProductoId">Producto afectado.</param>
-/// <param name="UsuarioId">Responsable. Queda en el movimiento y en la auditoria.</param>
 /// <param name="TipoMovimiento">Si entra o sale stock.</param>
 /// <param name="Motivo">Que lo origino.</param>
 /// <param name="Cantidad">
@@ -35,7 +40,6 @@ namespace Colorsin.Application.Inventario.DTOs;
 public sealed record RegistrarMovimientoDto(
     int SucursalId,
     int ProductoId,
-    int UsuarioId,
     TipoMovimiento TipoMovimiento,
     MotivoMovimiento Motivo,
     decimal Cantidad,
