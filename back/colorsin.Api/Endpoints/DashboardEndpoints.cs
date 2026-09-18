@@ -50,15 +50,21 @@ public static class DashboardEndpoints
                 IDashboardService dashboard,
                 int? sucursalId,
                 DateOnly? fechaCorte,
+                int? diasUmbralVencimiento,
                 CancellationToken cancellationToken) =>
             TypedResults.Ok(await dashboard.ObtenerResumenGeneralAsync(
-                sucursalId, fechaCorte, cancellationToken)))
+                sucursalId, fechaCorte, diasUmbralVencimiento, cancellationToken)))
             .WithName("DashboardResumenGeneral")
             .WithSummary("Totales de la pantalla de inicio")
             .WithDescription(
-                "Ventas del dia y del mes, stock total en litros, traslados en transito y " +
-                "alertas de reposicion. `sucursalId` omitido trae toda la red. `fechaCorte` " +
-                "omitida usa el dia de hoy; darla permite consultar un cierre pasado.");
+                "Ventas del dia y del mes, stock total en litros, traslados en transito, " +
+                "alertas de reposicion y alertas de caducidad. `sucursalId` omitido trae toda " +
+                "la red. `fechaCorte` omitida usa el dia de hoy; darla permite consultar un " +
+                "cierre pasado. " +
+                "`diasUmbralVencimiento` omitido usa el configurado en " +
+                "`AlertasInventario:DiasUmbralVencimiento`. " +
+                "OJO: las alertas de caducidad se cuentan siempre contra HOY, no contra " +
+                "`fechaCorte`: lo que esta por vencer solo tiene sentido desde el presente.");
 
         // ---------------------------------------------------------------------
         // Ventas
@@ -104,16 +110,18 @@ public static class DashboardEndpoints
                 CancellationToken cancellationToken) =>
             TypedResults.Ok(await dashboard.ObtenerMetricasInventarioAsync(
                 sucursalId,
-                dias ?? 30,
+                dias,
                 topLotes ?? 10,
                 topMovimientos ?? 10,
                 cancellationToken)))
             .WithName("DashboardMetricasInventario")
             .WithSummary("Stock por sede, vencimientos y ultimos movimientos")
             .WithDescription(
-                "`dias` es el horizonte de vencimientos, entre 1 y 365; los lotes YA VENCIDOS " +
-                "con saldo entran siempre, sea cual sea el horizonte. Los lotes llegan en orden " +
-                "FEFO. `topLotes` y `topMovimientos` se acotan entre 1 y 50.");
+                "`dias` es el horizonte de vencimientos, entre 1 y 365; omitido usa el " +
+                "configurado en `AlertasInventario:DiasUmbralVencimiento`, el mismo con el que " +
+                "el resumen cuenta sus alertas. Los lotes YA VENCIDOS con saldo entran siempre, " +
+                "sea cual sea el horizonte. Los lotes llegan en orden FEFO. " +
+                "`topLotes` y `topMovimientos` se acotan entre 1 y 50.");
 
         // ---------------------------------------------------------------------
         // Transferencias

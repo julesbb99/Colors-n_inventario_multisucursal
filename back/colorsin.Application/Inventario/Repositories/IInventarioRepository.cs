@@ -76,10 +76,10 @@ public interface IInventarioRepository
     /// Lo usa la recepcion de compras para decidir entre sumar a un lote que ya
     /// existe o crear uno nuevo.
     ///
-    /// OJO: la tabla `lotes` NO tiene indice unico sobre
-    /// (producto_id, sucursal_id, numero_lote). Si llegaran a existir dos filas
-    /// con el mismo numero, este metodo devuelve una cualquiera. Ver la nota de
-    /// la implementacion.
+    /// La unicidad de (producto_id, sucursal_id, numero_lote) la garantiza el
+    /// indice `ux_lotes_producto_sucursal_numero`, asi que como mucho hay una
+    /// fila. Ver la nota de la implementacion sobre por que el FOR UPDATE no
+    /// bastaba por si solo.
     /// </summary>
     Task<Lote?> ObtenerLotePorNumeroParaActualizarAsync(
         int sucursalId,

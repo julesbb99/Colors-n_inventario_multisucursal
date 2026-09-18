@@ -96,7 +96,41 @@ public static class InventarioEndpoints
             .WithSummary("Libro mayor, del mas reciente al mas antiguo")
             .WithDescription("`limite` se acota entre 1 y 1000.");
 
+        // ---------------------------------------------------------------------
+        // Lotes
+        //
+        // OJO, LA RUTA /lotes CAMBIO DE SIGNIFICADO. Antes era la cola FEFO de un
+        // producto en una sede, con los dos parametros obligatorios; ahora es el
+        // listado general, con los dos opcionales. La consulta anterior no se
+        // perdio: vive en /lotes/fefo, con el mismo comportamiento.
+        //
+        // El motivo es que "listar los lotes de mi sede" es la consulta que se
+        // hace todos los dias, y exigir un producto para verla la volvia
+        // inservible como listado.
+        // ---------------------------------------------------------------------
         grupo.MapGet("/lotes", async (
+                IInventarioService inventario,
+                IUsuarioContexto contexto,
+                int? sucursalId,
+                int? productoId,
+                bool? soloConSaldo,
+                int? limite,
+                CancellationToken cancellationToken) =>
+            TypedResults.Ok(await inventario.ObtenerLotesAsync(
+                contexto.ResolverFiltroSucursal(sucursalId),
+                productoId,
+                soloConSaldo ?? false,
+                limite ?? 200,
+                cancellationToken)))
+            .WithName("InventarioLotes")
+            .WithSummary("Lotes de una sede o de la red, en orden FEFO")
+            .WithDescription(
+                "Un gerente u operador ve solo su sede, omita o no el parametro. " +
+                "`soloConSaldo=true` deja fuera los agotados; por defecto salen todos, para " +
+                "que un lote recien creado -que esta en cero- se vea. `limite` se acota entre " +
+                "1 y 1000.");
+
+        grupo.MapGet("/lotes/fefo", async (
                 IInventarioService inventario,
                 IUsuarioContexto contexto,
                 int sucursalId,
@@ -110,11 +144,66 @@ public static class InventarioEndpoints
                 return TypedResults.Ok(await inventario.ObtenerLotesPorVencimientoAsync(
                     sucursalId, productoId, cancellationToken));
             })
-            .WithName("InventarioLotes")
-            .WithSummary("Lotes disponibles en orden FEFO")
+            .WithName("InventarioLotesFefo")
+            .WithSummary("Cola de despacho de un producto en una sede")
             .WithDescription(
                 "El primero de la lista es el que se debe despachar: vence antes. Los que no " +
-                "caducan van al final. Solo trae lotes con saldo mayor que cero.");
+                "caducan van al final. Solo trae lotes con saldo mayor que cero. Es la misma " +
+                "consulta que usan por dentro las ventas y los traslados para escoger lote.");
+
+        grupo.MapGet("/lotes/proximos-a-vencer", async (
+                IInventarioService inventario,
+                IUsuarioContexto contexto,
+                int? sucursalId,
+                int? dias,
+                bool? incluirVencidos,
+                int? limite,
+                CancellationToken cancellationToken) =>
+            TypedResults.Ok(await inventario.ObtenerLotesProximosAVencerAsync(
+                contexto.ResolverFiltroSucursal(sucursalId),
+                dias,
+                incluirVencidos ?? false,
+                limite ?? 200,
+                cancellationToken)))
+            .WithName("InventarioLotesProximosAVencer")
+            .WithSummary("Alertas de caducidad")
+            .WithDescription(
+                "Lotes CON SALDO cuyo vencimiento cae entre hoy y hoy + `dias`. `dias` omitido " +
+                "usa el umbral configurado en `AlertasInventario:DiasUmbralVencimiento`; " +
+                "fuera de [1, 365] se acota. " +
+                "`incluirVencidos=true` agrega los que YA caducaron y todavia tienen " +
+                "existencias, que son el caso mas urgente y por defecto NO salen aqui. " +
+                "El tablero si los incluye siempre.");
+
+        grupo.MapGet("/lotes/{id:int}", async (
+                int id,
+                IInventarioService inventario,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                var lote = await inventario.ObtenerLotePorIdAsync(id, cancellationToken);
+
+                if (lote is null)
+                {
+                    return RespuestasHttp.Fallo(
+                        StatusCodes.Status404NotFound,
+                        "Lote no encontrado",
+                        $"No existe el lote {id}.");
+                }
+
+                // La comprobacion de sede va DESPUES de leer, porque hasta no
+                // leerlo no se sabe en que bodega esta. Tiene una consecuencia
+                // que conviene tener presente: un 403 aqui confirma que ese id
+                // existe, aunque sea de otra sede. Es el mismo comportamiento del
+                // resto de modulos y se acepta porque los ids son correlativos y
+                // no revelan nada que no se adivine contando.
+                contexto.ExigirAccesoASucursal(lote.SucursalId);
+
+                return Results.Ok(lote);
+            })
+            .WithName("InventarioLoteDetalle")
+            .WithSummary("Detalle de un lote")
+            .Produces<LoteDto>();
 
         // ---------------------------------------------------------------------
         // Escritura
@@ -158,8 +247,104 @@ public static class InventarioEndpoints
             // abrirlo; pero conviene que sea una decision tomada, no un descuido.
             .RequireAuthorization(PoliticasAutorizacion.Supervision);
 
+        // ---------------------------------------------------------------------
+        // Lotes: alta y correccion
+        //
+        // SUPERVISION LAS DOS, y aqui si estaba en la lista pedida. El motivo de
+        // fondo es el mismo que el del movimiento manual: un lote es la ficha con
+        // la que se rastrea la mercancia hasta el fabricante, y su fecha de
+        // caducidad es la que decide que se despacha primero y que se da de baja.
+        // Poder correr esa fecha a mano es poder alargarle la vida a un producto
+        // vencido en el papel.
+        //
+        // Ninguna de las dos cambia cantidades: para eso esta el movimiento.
+        // ---------------------------------------------------------------------
+        grupo.MapPost("/lotes", async (
+                CrearLoteDto peticion,
+                IInventarioService inventario,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                contexto.ExigirAccesoASucursal(peticion.SucursalId);
+
+                var resultado = await inventario.CrearLoteAsync(
+                    peticion, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Created($"/api/inventario/lotes/{resultado.Lote!.Id}", resultado)
+                    : RespuestasHttp.Fallo(
+                        CodigoDe(resultado.Error), "Lote rechazado", resultado.Mensaje);
+            })
+            .WithName("InventarioCrearLote")
+            .WithSummary("Abre un lote nuevo, vacio. Solo supervision.")
+            .WithDescription(
+                "NO recibe cantidad, a proposito: el saldo de una sede vive a la vez en el " +
+                "consolidado y en el desglose por lote, y crear un lote con cantidad lo " +
+                "sumaria solo al desglose, sin fila en el libro mayor que diga de donde salio. " +
+                "El lote nace en cero y la mercancia entra con POST /api/inventario/movimientos " +
+                "indicando `loteId`, o con una recepcion de compra. " +
+                "El numero de lote es unico dentro de la pareja (producto, sede): si vuelve a " +
+                "llegar el mismo, se le suma cantidad en vez de abrir otro.")
+            .Produces<ResultadoLote>(StatusCodes.Status201Created)
+            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+
+        grupo.MapPut("/lotes/{id:int}", async (
+                int id,
+                ActualizarLoteDto peticion,
+                IInventarioService inventario,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                // Hay que saber en que sede esta ANTES de dejar editarlo, y eso
+                // exige leerlo. Una lectura de mas frente a permitir que un
+                // gerente corrija la caducidad de un lote de otra sede.
+                var actual = await inventario.ObtenerLotePorIdAsync(id, cancellationToken);
+
+                if (actual is null)
+                {
+                    return RespuestasHttp.Fallo(
+                        StatusCodes.Status404NotFound,
+                        "Lote no encontrado",
+                        $"No existe el lote {id}.");
+                }
+
+                contexto.ExigirAccesoASucursal(actual.SucursalId);
+
+                var resultado = await inventario.ActualizarLoteAsync(
+                    id, peticion, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Ok(resultado)
+                    : RespuestasHttp.Fallo(
+                        CodigoDe(resultado.Error), "Lote rechazado", resultado.Mensaje);
+            })
+            .WithName("InventarioActualizarLote")
+            .WithSummary("Corrige el numero o la caducidad de un lote. Solo supervision.")
+            .WithDescription(
+                "Solo se corrige lo que se digito. La cantidad no se toca por aqui -eso es un " +
+                "movimiento de ajuste, que ademas queda en el libro mayor- y el producto y la " +
+                "sede tampoco, porque mover un lote de bodega es un traslado. " +
+                "Es un PUT: el cuerpo describe como debe quedar el lote, asi que un " +
+                "`fechaVencimiento` nulo BORRA la fecha en vez de dejarla como estaba. " +
+                "El valor anterior y el nuevo quedan en auditoria_eventos.")
+            .Produces<ResultadoLote>()
+            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+
         return rutas;
     }
+
+    private static int CodigoDe(ErrorLote error) => error switch
+    {
+        ErrorLote.ProductoNoEncontrado
+            or ErrorLote.SucursalNoEncontrada
+            or ErrorLote.LoteNoEncontrado
+            => StatusCodes.Status404NotFound,
+
+        // Existe, pero el estado actual de los datos no admite la operacion.
+        ErrorLote.NumeroLoteDuplicado => StatusCodes.Status409Conflict,
+
+        _ => StatusCodes.Status400BadRequest
+    };
 
     private static int CodigoDe(ErrorMovimiento error) => error switch
     {

@@ -59,6 +59,26 @@ namespace Colorsin.Application.Dashboard.DTOs;
 /// criterio de <c>IInventarioService.ObtenerAlertasStockBajoAsync</c>. Aqui va
 /// solo el conteo; el detalle se pide a ese metodo, que ya existe.
 /// </param>
+/// <param name="AlertasVencimiento">
+/// Cuantos lotes CON SALDO caducan dentro de
+/// <paramref name="DiasUmbralVencimiento"/> dias, INCLUIDOS los que ya vencieron.
+///
+/// Los vencidos entran a proposito y son el caso mas urgente de los dos: un lote
+/// caducado con existencias no se puede despachar y lo que toca es darlo de baja.
+/// Dejarlos fuera del contador porque su fecha quedo "antes de la ventana" seria
+/// esconder justamente lo que ya se salio de control.
+///
+/// Es la contraparte de <paramref name="AlertasStockBajo"/>: uno avisa de lo que
+/// falta, este de lo que sobra y se va a perder. El detalle se pide a
+/// <c>GET /api/dashboard/inventario</c> o a
+/// <c>GET /api/inventario/lotes/proximos-a-vencer</c>.
+/// </param>
+/// <param name="DiasUmbralVencimiento">
+/// Ventana usada para <paramref name="AlertasVencimiento"/>, en dias. Viaja de
+/// vuelta porque sin ella el numero no se puede interpretar: "7 lotes por vencer"
+/// no dice lo mismo a 30 dias que a 180. Sale de
+/// <c>AlertasInventario:DiasUmbralVencimiento</c> salvo que se pida otro.
+/// </param>
 /// <param name="GeneradoEn">Momento en que se leyeron los datos.</param>
 public sealed record ResumenGeneralDto(
     int? SucursalId,
@@ -72,4 +92,6 @@ public sealed record ResumenGeneralDto(
     int ProductosSinConversionALitros,
     int TransferenciasEnTransito,
     int AlertasStockBajo,
+    int AlertasVencimiento,
+    int DiasUmbralVencimiento,
     DateTime GeneradoEn);

@@ -34,6 +34,103 @@ public interface IInventarioService
         int productoId,
         CancellationToken cancellationToken = default);
 
+    // =========================================================================
+    // LOTES: consulta, alta y correccion
+    //
+    // NINGUNO DE ESTOS METODOS CAMBIA CANTIDADES. Un lote se crea vacio y su
+    // saldo se mueve solo por el camino que ademas actualiza el consolidado de
+    // la sede y deja fila en el libro mayor: un movimiento de inventario, una
+    // recepcion de compra, una venta o un traslado. Ver CrearLoteDto.
+    // =========================================================================
+
+    /// <summary>
+    /// Lotes que cumplen los filtros, en orden FEFO. Los filtros nulos no se
+    /// aplican.
+    /// </summary>
+    /// <param name="sucursalId">Sede, o nulo para toda la red.</param>
+    /// <param name="productoId">Producto, o nulo para todos.</param>
+    /// <param name="soloConSaldo">
+    /// Deja fuera los agotados. Falso por defecto, para que un lote recien creado
+    /// -que esta en cero- se vea.
+    /// </param>
+    /// <param name="limite">Tope de filas, de 1 a 1000.</param>
+    Task<IReadOnlyList<LoteDto>> ObtenerLotesAsync(
+        int? sucursalId = null,
+        int? productoId = null,
+        bool soloConSaldo = false,
+        int limite = 200,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>El lote con ese id, o <c>null</c> si no existe.</summary>
+    Task<LoteDto?> ObtenerLotePorIdAsync(
+        int id,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lotes CON SALDO que caducan dentro del umbral.
+    ///
+    /// EL RANGO es <c>hoy &lt;= fecha_vencimiento &lt;= hoy + diasUmbral</c>. Los
+    /// lotes que no caducan y los agotados quedan fuera.
+    /// </summary>
+    /// <param name="sucursalId">Sede, o nulo para toda la red.</param>
+    /// <param name="diasUmbral">
+    /// Dias hacia adelante. NULO usa el umbral configurado en
+    /// <c>AlertasInventario:DiasUmbralVencimiento</c>, que es el caso normal: el
+    /// valor existe justamente para no tener que repetirlo en cada llamada. Un
+    /// valor fuera de [1, 365] se acota al limite mas cercano.
+    /// </param>
+    /// <param name="incluirVencidos">
+    /// Quita el limite inferior del rango, de modo que tambien entren los lotes
+    /// que YA caducaron y todavia tienen saldo.
+    ///
+    /// Falso por defecto, que es el rango pedido en la especificacion. Merece un
+    /// aviso: un lote vencido con existencias es MAS urgente que uno que vence en
+    /// tres semanas -no se puede despachar y hay que darlo de baja- y con el
+    /// valor por defecto no aparece en esta lista. El tablero si los incluye
+    /// siempre; ver <c>MetricasInventarioDto.LotesProximosAVencer</c>.
+    /// </param>
+    /// <param name="limite">Tope de filas, de 1 a 1000.</param>
+    Task<IReadOnlyList<LoteDto>> ObtenerLotesProximosAVencerAsync(
+        int? sucursalId = null,
+        int? diasUmbral = null,
+        bool incluirVencidos = false,
+        int limite = 200,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Abre un lote nuevo, VACIO. Ver <see cref="CrearLoteDto"/> sobre por que no
+    /// recibe cantidad.
+    ///
+    /// No lanza excepciones por reglas de negocio. Revisa
+    /// <see cref="ResultadoLote.Exito"/>.
+    /// </summary>
+    /// <param name="peticion">Producto, sede, numero y caducidad.</param>
+    /// <param name="usuarioId">
+    /// Responsable, para la auditoria. Sale del token, no del cuerpo de la
+    /// peticion; el mismo criterio que en
+    /// <see cref="RegistrarMovimientoAsync"/>.
+    /// </param>
+    Task<ResultadoLote> CrearLoteAsync(
+        CrearLoteDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Corrige el numero o la caducidad de un lote existente. No toca cantidades
+    /// ni mueve el lote de sede; ver <see cref="ActualizarLoteDto"/>.
+    ///
+    /// Es un reemplazo completo del estado editable: lo que no venga en el cuerpo
+    /// se borra, no se conserva.
+    /// </summary>
+    /// <param name="id">Lote a corregir.</param>
+    /// <param name="peticion">Como debe quedar.</param>
+    /// <param name="usuarioId">Responsable, para la auditoria. Sale del token.</param>
+    Task<ResultadoLote> ActualizarLoteAsync(
+        int id,
+        ActualizarLoteDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Movimientos del libro mayor, del mas reciente al mas antiguo.</summary>
     Task<IReadOnlyList<MovimientoInventarioDto>> ObtenerMovimientosAsync(
         int? sucursalId = null,

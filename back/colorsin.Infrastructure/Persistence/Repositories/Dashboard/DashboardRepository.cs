@@ -412,6 +412,28 @@ public sealed class DashboardRepository : IDashboardRepository
             .ToList();
     }
 
+    public Task<int> ContarLotesProximosAVencerAsync(
+        int? sucursalId,
+        DateOnly limiteVencimiento,
+        CancellationToken cancellationToken = default)
+    {
+        // El MISMO criterio que ObtenerLotesProximosAVencerAsync, palabra por
+        // palabra, y sin Take: el conteo y la lista tienen que responder a la
+        // misma pregunta o el resumen dira una cosa y el detalle otra.
+        var lotes = _db.Lotes
+            .AsNoTracking()
+            .Where(l => l.CantidadBase > 0
+                     && l.FechaVencimiento != null
+                     && l.FechaVencimiento <= limiteVencimiento);
+
+        if (sucursalId is int id)
+        {
+            lotes = lotes.Where(l => l.SucursalId == id);
+        }
+
+        return lotes.CountAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<MovimientoInventarioDto>> ObtenerMovimientosRecientesAsync(
         int? sucursalId,
         int top,

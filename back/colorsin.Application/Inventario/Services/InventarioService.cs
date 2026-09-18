@@ -1,5 +1,6 @@
 using System.Globalization;
 using Colorsin.Application.Comun.Auditoria;
+using Colorsin.Application.Comun.Repositories;
 using Colorsin.Application.Comun.Services;
 using Colorsin.Application.Inventario.DTOs;
 using Colorsin.Application.Inventario.Mapping;
@@ -17,18 +18,27 @@ public sealed class InventarioService : IInventarioService
     private readonly IInventarioRepository _inventario;
     private readonly IUnidadMedidaService _unidades;
     private readonly IProductoRepository _productos;
+    private readonly ILoteRepository _lotes;
+    private readonly ISucursalRepository _sucursales;
     private readonly IAuditoriaService _auditoria;
+    private readonly OpcionesAlertasInventario _alertas;
 
     public InventarioService(
         IInventarioRepository inventario,
         IUnidadMedidaService unidades,
         IProductoRepository productos,
-        IAuditoriaService auditoria)
+        ILoteRepository lotes,
+        ISucursalRepository sucursales,
+        IAuditoriaService auditoria,
+        OpcionesAlertasInventario alertas)
     {
         _inventario = inventario;
         _unidades = unidades;
         _productos = productos;
+        _lotes = lotes;
+        _sucursales = sucursales;
         _auditoria = auditoria;
+        _alertas = alertas;
     }
 
     // =========================================================================
@@ -64,11 +74,7 @@ public sealed class InventarioService : IInventarioService
         var lotes = await _inventario.ObtenerLotesPorVencimientoAsync(
             sucursalId, productoId, cancellationToken);
 
-        // Una sola lectura del reloj para toda la lista: si se leyera por lote,
-        // una consulta lanzada justo a medianoche daria dias distintos para
-        // lotes con la misma fecha.
-        var hoy = DateOnly.FromDateTime(DateTime.Now);
-        return lotes.Select(l => l.ToDto(hoy)).ToList();
+        return ADto(lotes);
     }
 
     public async Task<IReadOnlyList<MovimientoInventarioDto>> ObtenerMovimientosAsync(
@@ -88,6 +94,256 @@ public sealed class InventarioService : IInventarioService
     {
         var saldos = await _inventario.ObtenerAlertasStockBajoAsync(sucursalId, cancellationToken);
         return saldos.Select(s => s.ToAlertaDto()).ToList();
+    }
+
+    // =========================================================================
+    // LOTES: consulta
+    // =========================================================================
+
+    public async Task<IReadOnlyList<LoteDto>> ObtenerLotesAsync(
+        int? sucursalId = null,
+        int? productoId = null,
+        bool soloConSaldo = false,
+        int limite = 200,
+        CancellationToken cancellationToken = default)
+    {
+        var lotes = await _lotes.ObtenerAsync(
+            sucursalId, productoId, soloConSaldo, limite, cancellationToken);
+
+        return ADto(lotes);
+    }
+
+    public async Task<LoteDto?> ObtenerLotePorIdAsync(
+        int id,
+        CancellationToken cancellationToken = default)
+    {
+        var lote = await _lotes.ObtenerPorIdAsync(id, cancellationToken);
+        return lote?.ToDto(HoyLocal());
+    }
+
+    public async Task<IReadOnlyList<LoteDto>> ObtenerLotesProximosAVencerAsync(
+        int? sucursalId = null,
+        int? diasUmbral = null,
+        bool incluirVencidos = false,
+        int limite = 200,
+        CancellationToken cancellationToken = default)
+    {
+        // El umbral configurado cuando no se pide otro. Acotar y resolver el
+        // valor por defecto vive en OpcionesAlertasInventario para que el tablero
+        // y este modulo no puedan hacerlo distinto.
+        var dias = _alertas.ResolverHorizonte(diasUmbral);
+
+        // Una sola lectura del reloj para toda la consulta: leerlo dos veces -una
+        // para el rango y otra para calcular los dias que faltan- daria resultados
+        // incoherentes en una llamada lanzada justo a medianoche.
+        var hoy = HoyLocal();
+
+        var lotes = await _lotes.ObtenerProximosAVencerAsync(
+            sucursalId,
+            // Sin limite inferior es como entran los que ya vencieron.
+            incluirVencidos ? null : hoy,
+            hoy.AddDays(dias),
+            limite,
+            cancellationToken);
+
+        return lotes.Select(l => l.ToDto(hoy)).ToList();
+    }
+
+    // =========================================================================
+    // LOTES: alta y correccion
+    //
+    // LOS DOS VAN EN TRANSACCION, y no porque escriban en varias tablas -cada uno
+    // toca `lotes` y `auditoria_eventos`- sino porque necesitan DOS guardados: el
+    // primero para que MySQL asigne el id del lote, que hace falta en el detalle
+    // de la auditoria. Sin transaccion, cada guardado se confirma por su cuenta y
+    // el lote podria quedar creado con su evento perdido.
+    //
+    // La transaccion se pide a IInventarioRepository y no a ILoteRepository: los
+    // dos repositorios comparten el AppDbContext de la peticion, asi que es la
+    // misma unidad de trabajo, y tener un solo sitio donde se abre transaccion en
+    // el modulo evita que se anide una dentro de otra por descuido.
+    // =========================================================================
+
+    public async Task<ResultadoLote> CrearLoteAsync(
+        CrearLoteDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        var numero = peticion.NumeroLote?.Trim();
+        if (string.IsNullOrEmpty(numero))
+        {
+            return ResultadoLote.Fallo(
+                ErrorLote.NumeroLoteVacio,
+                "El numero de lote es obligatorio: es lo que permite rastrear la mercancia " +
+                "hasta el fabricante.");
+        }
+
+        // Se comprueban producto y sede antes de tocar nada. La base tiene claves
+        // foraneas y rechazaria igual, pero un 404 con el id que fallo se lee; un
+        // error de restriccion de MySQL, no.
+        var producto = await _productos.ObtenerPorIdAsync(peticion.ProductoId, cancellationToken);
+        if (producto is null)
+        {
+            return ResultadoLote.Fallo(
+                ErrorLote.ProductoNoEncontrado,
+                $"No existe el producto {peticion.ProductoId}.");
+        }
+
+        var sucursal = await _sucursales.ObtenerPorIdAsync(peticion.SucursalId, cancellationToken);
+        if (sucursal is null)
+        {
+            return ResultadoLote.Fallo(
+                ErrorLote.SucursalNoEncontrada,
+                $"No existe la sede {peticion.SucursalId}.");
+        }
+
+        if (await _lotes.ExisteNumeroAsync(
+                peticion.ProductoId, peticion.SucursalId, numero,
+                excluyendoId: null, cancellationToken))
+        {
+            return ResultadoLote.Fallo(
+                ErrorLote.NumeroLoteDuplicado,
+                $"La sede '{sucursal.Nombre}' ya tiene un lote '{numero}' de " +
+                $"'{producto.Nombre}'. Si volvio a llegar el mismo lote, no se abre otro: " +
+                "se le suma cantidad con un ingreso o con una recepcion de compra.");
+        }
+
+        return await _inventario.EjecutarEnTransaccionAsync(
+            ct => CrearEnTransaccionAsync(peticion, numero, usuarioId, producto, sucursal.Nombre, ct),
+            cancellationToken);
+    }
+
+    private async Task<ResultadoLote> CrearEnTransaccionAsync(
+        CrearLoteDto peticion,
+        string numero,
+        int usuarioId,
+        Producto producto,
+        string nombreSucursal,
+        CancellationToken cancellationToken)
+    {
+        var lote = new Lote
+        {
+            ProductoId = peticion.ProductoId,
+            SucursalId = peticion.SucursalId,
+            NumeroLote = numero,
+            FechaVencimiento = peticion.FechaVencimiento,
+            // VACIO, no nulo. Los dos se comportan igual en las consultas -la
+            // condicion `> 0` descarta ambos- pero un cero dice "este lote no
+            // tiene existencias" y un nulo dice "no se sabe". Aqui si se sabe.
+            CantidadBase = 0m,
+            FechaIngreso = peticion.FechaIngreso
+            // Si FechaIngreso viene nula la pone la base con CURRENT_TIMESTAMP.
+        };
+
+        _lotes.Agregar(lote);
+
+        // Se guarda aqui para que MySQL asigne el id, que hace falta abajo.
+        // Sigue dentro de la transaccion.
+        await _lotes.GuardarCambiosAsync(cancellationToken);
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo,
+            "CrearLote",
+            usuarioId,
+            $"lote={lote.Id} ('{numero}') | " +
+            $"producto={peticion.ProductoId} ('{producto.Nombre}') | " +
+            $"sucursal={peticion.SucursalId} ('{nombreSucursal}') | " +
+            $"vencimiento={Fecha(peticion.FechaVencimiento)} | cantidadBase=0",
+            cancellationToken);
+
+        await _lotes.GuardarCambiosAsync(cancellationToken);
+
+        // Se rearma el DTO a mano en vez de releer el lote: las navegaciones no
+        // estan cargadas -la entidad se acaba de crear- y una consulta extra solo
+        // para los nombres que ya tenemos aqui no aporta nada.
+        var hoy = HoyLocal();
+        var dias = lote.FechaVencimiento is null
+            ? (int?)null
+            : lote.FechaVencimiento.Value.DayNumber - hoy.DayNumber;
+
+        return ResultadoLote.Ok(
+            new LoteDto(
+                lote.Id,
+                lote.ProductoId,
+                producto.Nombre,
+                lote.SucursalId,
+                nombreSucursal,
+                lote.NumeroLote,
+                lote.FechaVencimiento,
+                lote.CantidadBase,
+                producto.UnidadBase?.Simbolo,
+                lote.FechaIngreso,
+                dias,
+                dias < 0),
+            "Lote creado. Queda en cero: la mercancia entra con un movimiento de ingreso " +
+            "o con una recepcion de compra.");
+    }
+
+    public async Task<ResultadoLote> ActualizarLoteAsync(
+        int id,
+        ActualizarLoteDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        var numero = peticion.NumeroLote?.Trim();
+        if (string.IsNullOrEmpty(numero))
+        {
+            return ResultadoLote.Fallo(
+                ErrorLote.NumeroLoteVacio,
+                "El numero de lote es obligatorio y no se puede dejar en blanco.");
+        }
+
+        var lote = await _lotes.ObtenerParaEditarAsync(id, cancellationToken);
+        if (lote is null)
+        {
+            return ResultadoLote.Fallo(ErrorLote.LoteNoEncontrado, $"No existe el lote {id}.");
+        }
+
+        // Se excluye el propio lote, o una edicion que no cambia el numero
+        // chocaria consigo misma.
+        if (await _lotes.ExisteNumeroAsync(
+                lote.ProductoId, lote.SucursalId, numero, id, cancellationToken))
+        {
+            return ResultadoLote.Fallo(
+                ErrorLote.NumeroLoteDuplicado,
+                $"Ya hay otro lote con el numero '{numero}' para ese producto en esa sede.");
+        }
+
+        return await _inventario.EjecutarEnTransaccionAsync(
+            ct => ActualizarEnTransaccionAsync(lote, numero, peticion, usuarioId, ct),
+            cancellationToken);
+    }
+
+    private async Task<ResultadoLote> ActualizarEnTransaccionAsync(
+        Lote lote,
+        string numero,
+        ActualizarLoteDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken)
+    {
+        // Los valores anteriores se guardan ANTES de tocar la entidad: sin ellos
+        // la auditoria diria en que quedo el lote pero no de donde venia, que es
+        // justo lo que se necesita para revisar una correccion.
+        var numeroAnterior = lote.NumeroLote;
+        var vencimientoAnterior = lote.FechaVencimiento;
+
+        lote.NumeroLote = numero;
+        lote.FechaVencimiento = peticion.FechaVencimiento;
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo,
+            "ActualizarLote",
+            usuarioId,
+            $"lote={lote.Id} | producto={lote.ProductoId} | sucursal={lote.SucursalId} | " +
+            $"numero: '{numeroAnterior}' -> '{numero}' | " +
+            $"vencimiento: {Fecha(vencimientoAnterior)} -> {Fecha(peticion.FechaVencimiento)}",
+            cancellationToken);
+
+        // Un solo guardado: el UPDATE del lote y el INSERT del evento salen
+        // juntos porque comparten el mismo contexto.
+        await _lotes.GuardarCambiosAsync(cancellationToken);
+
+        return ResultadoLote.Ok(lote.ToDto(HoyLocal()), "Lote actualizado.");
     }
 
     // =========================================================================
@@ -382,6 +638,36 @@ public sealed class InventarioService : IInventarioService
 
         return detalle;
     }
+
+    /// <summary>
+    /// Fecha de hoy segun el reloj local del servidor de la aplicacion.
+    ///
+    /// OJO CON LA ZONA HORARIA. `lotes.fecha_ingreso` la llena MySQL con
+    /// CURRENT_TIMESTAMP, o sea con el reloj del CONTENEDOR, no con el de la
+    /// aplicacion. Hoy los dos estan en -05:00 y coinciden, pero eso no esta
+    /// fijado en el docker-compose: si el contenedor quedara en UTC, un lote que
+    /// vence hoy contaria como vencido cinco horas antes de tiempo.
+    /// </summary>
+    private static DateOnly HoyLocal() => DateOnly.FromDateTime(DateTime.Now);
+
+    /// <summary>
+    /// Convierte una lista de lotes leyendo el reloj UNA sola vez.
+    ///
+    /// Si se leyera por lote, una consulta lanzada justo a medianoche daria dias
+    /// distintos para lotes con la misma fecha de vencimiento.
+    /// </summary>
+    private static IReadOnlyList<LoteDto> ADto(IReadOnlyList<Lote> lotes)
+    {
+        var hoy = HoyLocal();
+        return lotes.Select(l => l.ToDto(hoy)).ToList();
+    }
+
+    /// <summary>
+    /// Formatea una fecha para el detalle de auditoria, en formato ISO y con el
+    /// caso nulo explicito: "(sin fecha)" se lee, una cadena vacia no.
+    /// </summary>
+    private static string Fecha(DateOnly? fecha) =>
+        fecha?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "(sin fecha)";
 
     /// <summary>
     /// Formatea con punto decimal siempre.

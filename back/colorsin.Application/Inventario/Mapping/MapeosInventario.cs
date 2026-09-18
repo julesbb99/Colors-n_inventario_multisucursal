@@ -42,20 +42,33 @@ public static class MapeosInventario
     /// Mapea un lote. <paramref name="hoy"/> entra por parametro y no se lee de
     /// <c>DateTime.Today</c> aqui adentro para que el calculo de dias sea
     /// verificable: una funcion que consulta el reloj no se puede probar.
+    ///
+    /// Exige que vengan cargadas las navegaciones Producto (con su UnidadBase) y
+    /// Sucursal. Sin ellas los nombres salen vacios, que es peor que fallar
+    /// porque no se nota hasta que alguien mira la pantalla.
     /// </summary>
-    public static LoteDto ToDto(this Lote lote, DateOnly hoy) => new(
-        lote.Id,
-        lote.ProductoId,
-        lote.Producto?.Nombre ?? string.Empty,
-        lote.SucursalId,
-        lote.NumeroLote,
-        lote.FechaVencimiento,
-        lote.CantidadBase,
-        lote.FechaIngreso,
+    public static LoteDto ToDto(this Lote lote, DateOnly hoy)
+    {
         // Negativo si ya vencio; nulo si el producto no caduca.
-        lote.FechaVencimiento is null
-            ? null
-            : lote.FechaVencimiento.Value.DayNumber - hoy.DayNumber);
+        var dias = lote.FechaVencimiento is null
+            ? (int?)null
+            : lote.FechaVencimiento.Value.DayNumber - hoy.DayNumber;
+
+        return new LoteDto(
+            lote.Id,
+            lote.ProductoId,
+            lote.Producto?.Nombre ?? string.Empty,
+            lote.SucursalId,
+            lote.Sucursal?.Nombre ?? string.Empty,
+            lote.NumeroLote,
+            lote.FechaVencimiento,
+            lote.CantidadBase,
+            lote.Producto?.UnidadBase?.Simbolo,
+            lote.FechaIngreso,
+            dias,
+            // Un lote sin fecha nunca esta vencido, no "vencido hace null dias".
+            dias < 0);
+    }
 
     public static MovimientoInventarioDto ToDto(this MovimientoInventario movimiento) => new(
         movimiento.Id,

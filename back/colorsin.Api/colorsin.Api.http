@@ -32,6 +32,8 @@ Accept: application/json
 #   Solo AdminGeneral y GerenteSucursal:
 #     GET  /api/comun/usuarios
 #     POST /api/inventario/movimientos          (ajustes y mermas a mano)
+#     POST /api/inventario/lotes                (abrir un lote)
+#     PUT  /api/inventario/lotes/{id}           (corregir numero o caducidad)
 #     POST /api/compras/ordenes
 #     POST /api/compras/ordenes/{id}/recepciones
 #     POST /api/transferencias/{id}/rechazo
@@ -136,6 +138,12 @@ GET {{host}}/api/dashboard/resumen?sucursalId=1
 Authorization: Bearer {{token}}
 Accept: application/json
 
+### Resumen general - otro umbral para las alertas de caducidad.
+### Ojo: esas alertas se cuentan siempre contra HOY, nunca contra fechaCorte.
+GET {{host}}/api/dashboard/resumen?diasUmbralVencimiento=365
+Authorization: Bearer {{token}}
+Accept: application/json
+
 ### Resumen general - cierre de un dia pasado
 GET {{host}}/api/dashboard/resumen?fechaCorte=2026-09-15
 Authorization: Bearer {{token}}
@@ -158,7 +166,10 @@ Authorization: Bearer {{token}}
 Accept: application/json
 
 
-### Inventario - vencimientos a 30 dias
+### Inventario - vencimientos con el umbral configurado
+### (AlertasInventario:DiasUmbralVencimiento, hoy 30 dias). A diferencia de
+### /api/inventario/lotes/proximos-a-vencer, el tablero SIEMPRE incluye los
+### lotes ya vencidos con saldo.
 GET {{host}}/api/dashboard/inventario
 Authorization: Bearer {{token}}
 Accept: application/json
@@ -238,11 +249,90 @@ Authorization: Bearer {{token}}
 GET {{host}}/api/inventario/movimientos?limite=20
 Authorization: Bearer {{token}}
 
-### Lotes en orden FEFO: el primero es el que se debe despachar
-GET {{host}}/api/inventario/lotes?sucursalId=1&productoId=2
+### Lotes de tu sede. OJO: esta ruta CAMBIO. Antes exigia sucursalId y
+### productoId y devolvia la cola FEFO; ahora los dos son opcionales y es el
+### listado general. La consulta de antes vive en /lotes/fefo, mas abajo.
+GET {{host}}/api/inventario/lotes
 Authorization: Bearer {{token}}
 
+### Solo los que tienen existencias (un lote recien creado esta en cero)
+GET {{host}}/api/inventario/lotes?soloConSaldo=true
+Authorization: Bearer {{token}}
+
+### Cola de despacho FEFO: el primero es el que se debe despachar
+GET {{host}}/api/inventario/lotes/fefo?sucursalId=1&productoId=2
+Authorization: Bearer {{token}}
+
+### Detalle de un lote (403 si es de otra sede, 404 si no existe)
+GET {{host}}/api/inventario/lotes/1
+Authorization: Bearer {{token}}
+
+### ---------------------------------------------------------------------------
+### ALERTAS DE CADUCIDAD
+###
+### El umbral por defecto sale de AlertasInventario:DiasUmbralVencimiento en
+### appsettings.json, hoy 30 dias.
+###
+### AVISO PARA PROBAR: de los once lotes sembrados, el primero en caducar es
+### ESA-2024-118 (sede 1) el 2026-11-30 y los otros diez vencen entre 2028 y
+### 2029. Con 30 dias esta lista sale VACIA, y eso NO es un fallo. Usa ?dias
+### para ver algo.
+### ---------------------------------------------------------------------------
+
+### Con el umbral configurado
+GET {{host}}/api/inventario/lotes/proximos-a-vencer
+Authorization: Bearer {{token}}
+
+### Pidiendo otro horizonte (se acota entre 1 y 365)
+GET {{host}}/api/inventario/lotes/proximos-a-vencer?dias=365
+Authorization: Bearer {{token}}
+
+### Incluyendo los que YA vencieron y todavia tienen existencias.
+### Por defecto NO salen, porque el rango empieza en hoy. Son el caso mas
+### urgente de los dos: no se pueden despachar y hay que darlos de baja.
+GET {{host}}/api/inventario/lotes/proximos-a-vencer?dias=365&incluirVencidos=true
+Authorization: Bearer {{token}}
+
+### Abrir un lote nuevo. Solo AdminGeneral y GerenteSucursal (403 al Operador).
+###
+### NO lleva cantidad, a proposito: el lote nace VACIO. Meterle cantidad aqui
+### sumaria al desglose por lote sin tocar el consolidado de la sede y sin dejar
+### fila en el libro mayor, o sea stock aparecido de la nada. La mercancia entra
+### con el POST /movimientos de abajo indicando loteId, o con una recepcion de
+### compra.
+POST {{host}}/api/inventario/lotes
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "productoId": 2,
+  "sucursalId": 1,
+  "numeroLote": "DTM-2026-095",
+  "fechaVencimiento": "2029-09-30"
+}
+
+### El mismo numero otra vez -> 409. Si vuelve a llegar el mismo lote no se abre
+### otro: se le suma cantidad.
+POST {{host}}/api/inventario/lotes
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "productoId": 2, "sucursalId": 1, "numeroLote": "DTM-2026-095" }
+
+### Corregir un lote. Solo supervision. Es un PUT: el cuerpo dice como debe
+### quedar, asi que omitir fechaVencimiento la BORRA en vez de dejarla igual.
+### El valor anterior y el nuevo quedan en auditoria_eventos.
+PUT {{host}}/api/inventario/lotes/12
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "numeroLote": "DTM-2026-095",
+  "fechaVencimiento": "2029-10-15"
+}
+
 ### Registrar un ingreso. Fijate que NO se manda usuarioId: sale del token.
+### Con loteId, la mercancia entra al lote Y al consolidado de la sede.
 POST {{host}}/api/inventario/movimientos
 Authorization: Bearer {{token}}
 Content-Type: application/json

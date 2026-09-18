@@ -116,15 +116,20 @@ public sealed class InventarioRepository : IInventarioRepository
         string numeroLote,
         CancellationToken cancellationToken = default)
     {
-        // Sin indice unico sobre (producto_id, sucursal_id, numero_lote), dos
-        // recepciones simultaneas del mismo lote pueden no verse entre si y
-        // terminar creando dos filas. El FOR UPDATE no lo evita: solo bloquea
-        // filas que ya existen, y aqui el caso es que todavia no existe
-        // ninguna. La solucion de fondo es el indice unico, que esta pendiente
-        // de decidir.
+        // El FOR UPDATE no basta por si solo: bloquea filas que ya existen, y el
+        // caso problematico es justo el contrario -que todavia no exista
+        // ninguna-, donde dos recepciones simultaneas del mismo lote no se ven
+        // entre si y las dos deciden crearlo.
         //
-        // Se ordena por id para que, si esas dos filas llegan a existir, al
-        // menos siempre se sume a la misma.
+        // Quien cierra ese hueco es el indice unico
+        // `ux_lotes_producto_sucursal_numero` sobre (producto_id, sucursal_id,
+        // numero_lote), que existe desde la migracion
+        // 20260917161220_LoteUnicoUsuarioOrdenYRecepcionParcial: la segunda
+        // insercion falla y su transaccion se revierte entera.
+        //
+        // Se sigue ordenando por id por si la base viniera de antes de esa
+        // migracion con filas duplicadas ya creadas: al menos siempre se le suma
+        // a la misma.
         var filas = await _db.Lotes
             .FromSqlInterpolated(
                 $@"SELECT * FROM lotes

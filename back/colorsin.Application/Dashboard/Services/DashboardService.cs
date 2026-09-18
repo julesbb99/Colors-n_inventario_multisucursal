@@ -1,6 +1,7 @@
 using Colorsin.Application.Comun.Auth;
 using Colorsin.Application.Dashboard.DTOs;
 using Colorsin.Application.Dashboard.Repositories;
+using Colorsin.Application.Inventario;
 using Colorsin.Domain.Transferencias;
 
 namespace Colorsin.Application.Dashboard.Services;
@@ -36,22 +37,27 @@ namespace Colorsin.Application.Dashboard.Services;
 public sealed class DashboardService : IDashboardService
 {
     // Topes duros de los parametros. Sin ellos, un `top` descuidado se trae el
-    // catalogo entero y un horizonte descuidado recorre la tabla de lotes.
+    // catalogo entero. El horizonte de vencimientos lo acota
+    // OpcionesAlertasInventario, que es tambien quien conoce el valor por
+    // defecto: dos sitios acotando lo mismo terminan acotando distinto.
     private const int TopMinimo = 1;
     private const int TopMaximo = 50;
-    private const int HorizonteMinimo = 1;
-    private const int HorizonteMaximo = 365;
 
     /// <summary>Decimales de los importes en pesos.</summary>
     private const int DecimalesMoneda = 2;
 
     private readonly IDashboardRepository _repositorio;
     private readonly IUsuarioContexto _contexto;
+    private readonly OpcionesAlertasInventario _alertas;
 
-    public DashboardService(IDashboardRepository repositorio, IUsuarioContexto contexto)
+    public DashboardService(
+        IDashboardRepository repositorio,
+        IUsuarioContexto contexto,
+        OpcionesAlertasInventario alertas)
     {
         _repositorio = repositorio;
         _contexto = contexto;
+        _alertas = alertas;
     }
 
     // =========================================================================
@@ -61,6 +67,7 @@ public sealed class DashboardService : IDashboardService
     public async Task<ResumenGeneralDto> ObtenerResumenGeneralAsync(
         int? sucursalId = null,
         DateOnly? fechaCorte = null,
+        int? diasUmbralVencimiento = null,
         CancellationToken cancellationToken = default)
     {
         // Aislamiento entre sedes. Desde aqui se usa `sede`, NUNCA `sucursalId`:
@@ -96,6 +103,16 @@ public sealed class DashboardService : IDashboardService
         var estados = await _repositorio.ObtenerConteoTransferenciasAsync(
             sede, cancellationToken);
 
+        // Las alertas de vencimiento se cuentan contra HOY, no contra la fecha de
+        // corte. No es un descuido: el corte sirve para preguntar "cuanto se
+        // vendio aquel dia", que es historia, mientras que "que esta por vencer"
+        // solo tiene sentido desde el presente. Consultar el cierre del mes
+        // pasado no deberia devolver una lista de urgencias de entonces.
+        var horizonte = _alertas.ResolverHorizonte(diasUmbralVencimiento);
+
+        var alertasVencimiento = await _repositorio.ContarLotesProximosAVencerAsync(
+            sede, HoyLocal().AddDays(horizonte), cancellationToken);
+
         return new ResumenGeneralDto(
             // La sede EFECTIVA, no la pedida: asi un gerente que no mando nada
             // ve en la respuesta cual es el alcance real de lo que esta mirando.
@@ -110,6 +127,8 @@ public sealed class DashboardService : IDashboardService
             stock.Sum(s => s.ProductosSinConversionALitros),
             ContarEstado(estados, EstadoTransferencia.EnTransito),
             stock.Sum(s => s.ProductosEnAlerta),
+            alertasVencimiento,
+            horizonte,
             DateTime.Now);
     }
 
@@ -190,14 +209,14 @@ public sealed class DashboardService : IDashboardService
 
     public async Task<MetricasInventarioDto> ObtenerMetricasInventarioAsync(
         int? sucursalId = null,
-        int diasHorizonteVencimiento = 30,
+        int? diasHorizonteVencimiento = null,
         int topLotes = 10,
         int topMovimientos = 10,
         CancellationToken cancellationToken = default)
     {
         var sede = _contexto.ResolverFiltroSucursal(sucursalId);
 
-        var horizonte = Acotar(diasHorizonteVencimiento, HorizonteMinimo, HorizonteMaximo);
+        var horizonte = _alertas.ResolverHorizonte(diasHorizonteVencimiento);
 
         // Aqui SI se lee el reloj, a diferencia del resumen general, que recibe
         // la fecha de corte por parametro. No es una inconsistencia: "cuantos

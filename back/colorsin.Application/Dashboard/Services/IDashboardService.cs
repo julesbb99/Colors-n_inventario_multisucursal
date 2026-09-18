@@ -49,9 +49,14 @@ public interface IDashboardService
     /// sea reproducible y para poder consultar un cierre pasado sin tener que
     /// cambiarle la hora a la maquina.
     /// </param>
+    /// <param name="diasUmbralVencimiento">
+    /// Ventana para el contador de lotes por vencer, de 1 a 365. Nulo usa el
+    /// umbral configurado en <c>AlertasInventario:DiasUmbralVencimiento</c>.
+    /// </param>
     Task<ResumenGeneralDto> ObtenerResumenGeneralAsync(
         int? sucursalId = null,
         DateOnly? fechaCorte = null,
+        int? diasUmbralVencimiento = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -84,7 +89,13 @@ public interface IDashboardService
     /// </summary>
     /// <param name="sucursalId">Sede a consultar. Nulo trae toda la red.</param>
     /// <param name="diasHorizonteVencimiento">
-    /// Cuantos dias hacia adelante mirar para los vencimientos, de 1 a 365.
+    /// Cuantos dias hacia adelante mirar para los vencimientos, de 1 a 365. Nulo
+    /// usa el umbral configurado en
+    /// <c>AlertasInventario:DiasUmbralVencimiento</c>, que es el mismo con el que
+    /// se cuenta <c>ResumenGeneralDto.AlertasVencimiento</c>: si no coincidieran,
+    /// la pantalla de inicio diria "7 lotes por vencer" y el detalle mostraria
+    /// otra cantidad.
+    ///
     /// Los lotes YA VENCIDOS con saldo entran siempre, sea cual sea el
     /// horizonte: son los mas urgentes y esconderlos por quedar fuera de la
     /// ventana seria justo al reves de lo que se busca.
@@ -93,7 +104,7 @@ public interface IDashboardService
     /// <param name="topMovimientos">Cuantos movimientos recientes devuelve, de 1 a 50.</param>
     Task<MetricasInventarioDto> ObtenerMetricasInventarioAsync(
         int? sucursalId = null,
-        int diasHorizonteVencimiento = 30,
+        int? diasHorizonteVencimiento = null,
         int topLotes = 10,
         int topMovimientos = 10,
         CancellationToken cancellationToken = default);

@@ -134,6 +134,21 @@ public interface IDashboardRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// CUANTOS lotes con saldo vencen el dia <paramref name="limiteVencimiento"/>
+    /// o antes. Mismo criterio que <see cref="ObtenerLotesProximosAVencerAsync"/>,
+    /// incluidos los ya vencidos.
+    ///
+    /// Existe aparte, y no contando lo que devuelve aquel, porque aquel viene
+    /// recortado por <c>top</c>: con diez lotes en la lista y un tope de diez, la
+    /// cifra del resumen diria "10" tanto si hay diez como si hay noventa. Un
+    /// COUNT no trae filas, asi que sale mas barato ademas de salir bien.
+    /// </summary>
+    Task<int> ContarLotesProximosAVencerAsync(
+        int? sucursalId,
+        DateOnly limiteVencimiento,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Ultimas filas del libro mayor, de la mas nueva a la mas vieja.
     ///
     /// Proyecta a mano en vez de reusar <c>IInventarioService.ObtenerMovimientosAsync</c>:

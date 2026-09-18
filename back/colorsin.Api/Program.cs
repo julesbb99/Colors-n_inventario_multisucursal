@@ -12,6 +12,7 @@ using Colorsin.Application.Compras.Repositories;
 using Colorsin.Application.Compras.Services;
 using Colorsin.Application.Dashboard.Repositories;
 using Colorsin.Application.Dashboard.Services;
+using Colorsin.Application.Inventario;
 using Colorsin.Application.Inventario.Repositories;
 using Colorsin.Application.Inventario.Services;
 using Colorsin.Application.Transferencias.Repositories;
@@ -118,7 +119,41 @@ builder.Services.AddScoped<IAuditoriaService, AuditoriaService>();
 // -----------------------------------------------------------------------------
 builder.Services.AddScoped<IProductoRepository, ProductoRepository>();
 builder.Services.AddScoped<IInventarioRepository, InventarioRepository>();
+builder.Services.AddScoped<ILoteRepository, LoteRepository>();
 builder.Services.AddScoped<IInventarioService, InventarioService>();
+
+// -----------------------------------------------------------------------------
+// Umbral de las alertas de caducidad.
+//
+// Se lee UNA vez al arrancar y se registra como Singleton, no como IOptions. Dos
+// motivos:
+//
+//   1. El valor no cambia en caliente. Un IOptionsMonitor traeria la maquinaria
+//      de recarga para algo que solo se toca al desplegar.
+//   2. Colorsin.Application no referencia ningun paquete de configuracion, y no
+//      deberia: es la capa que tiene que poder construirse en una prueba sin
+//      montar un arbol de appsettings. Aqui llega el numero ya resuelto.
+//
+// El constructor valida el rango y LANZA si esta fuera, asi que un umbral mal
+// escrito tumba el arranque con el nombre de la clave, en vez de dejar la API
+// avisando con una ventana que nadie pidio. Mismo criterio que JwtSettings.
+//
+// Si la seccion no existe se usa el valor de fabrica: la API tiene que levantar
+// aunque alguien borre la seccion del archivo.
+// -----------------------------------------------------------------------------
+var diasUmbralVencimiento = builder.Configuration
+    .GetSection(OpcionesAlertasInventario.Seccion)[nameof(OpcionesAlertasInventario.DiasUmbralVencimiento)];
+
+builder.Services.AddSingleton(
+    string.IsNullOrWhiteSpace(diasUmbralVencimiento)
+        ? OpcionesAlertasInventario.PorDefecto
+        : new OpcionesAlertasInventario(
+            int.TryParse(diasUmbralVencimiento, CultureInfo.InvariantCulture, out var dias)
+                ? dias
+                // Un texto que no es un numero se manda al constructor como un
+                // valor imposible para que falle por el mismo camino y con el
+                // mismo mensaje que un numero fuera de rango.
+                : -1));
 
 // -----------------------------------------------------------------------------
 // Modulo Compras: proveedores y ordenes de compra.
