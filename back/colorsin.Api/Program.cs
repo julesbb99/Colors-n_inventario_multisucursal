@@ -1,8 +1,11 @@
+using Colorsin.Api.Endpoints;
 using Colorsin.Application.Comun.Auditoria;
 using Colorsin.Application.Comun.Repositories;
 using Colorsin.Application.Comun.Services;
 using Colorsin.Application.Compras.Repositories;
 using Colorsin.Application.Compras.Services;
+using Colorsin.Application.Dashboard.Repositories;
+using Colorsin.Application.Dashboard.Services;
 using Colorsin.Application.Inventario.Repositories;
 using Colorsin.Application.Inventario.Services;
 using Colorsin.Application.Transferencias.Repositories;
@@ -13,6 +16,7 @@ using Colorsin.Infrastructure.Auditoria;
 using Colorsin.Infrastructure.Persistence;
 using Colorsin.Infrastructure.Persistence.Repositories;
 using Colorsin.Infrastructure.Persistence.Repositories.Compras;
+using Colorsin.Infrastructure.Persistence.Repositories.Dashboard;
 using Colorsin.Infrastructure.Persistence.Repositories.Transferencias;
 using Colorsin.Infrastructure.Persistence.Repositories.Ventas;
 using Microsoft.EntityFrameworkCore;
@@ -139,6 +143,57 @@ builder.Services.AddScoped<ITransportadoraRepository, TransportadoraRepository>(
 builder.Services.AddScoped<ITransferenciaRepository, TransferenciaRepository>();
 builder.Services.AddScoped<ITransferenciasService, TransferenciasService>();
 
+// -----------------------------------------------------------------------------
+// Modulo Dashboard: lecturas agregadas para la pantalla de inicio.
+//
+// Scoped como todo lo demas, aunque aqui el motivo es distinto: este modulo NO
+// escribe, asi que no hay transaccion que compartir. Va Scoped porque depende
+// del AppDbContext, que es Scoped; registrarlo Singleton se quedaria con el
+// DbContext de la primera peticion y el contenedor lo rechaza al arrancar.
+// -----------------------------------------------------------------------------
+builder.Services.AddScoped<IDashboardRepository, DashboardRepository>();
+builder.Services.AddScoped<IDashboardService, DashboardService>();
+
+// -----------------------------------------------------------------------------
+// CORS: que navegadores pueden llamar a esta API desde otra pagina.
+//
+// Los origenes NO van en el codigo sino en configuracion
+// (`Cors:OrigenesPermitidos`), por lo mismo que la cadena de conexion: cambian
+// entre tu maquina, pruebas y produccion, y recompilar para cambiar un puerto es
+// absurdo. appsettings.Development.json ya trae los puertos de desarrollo
+// habituales; el appsettings.json versionado los deja VACIOS a proposito.
+//
+// NUNCA AllowAnyOrigin AQUI. Esta API todavia no tiene autenticacion, y estos
+// endpoints entregan totales de facturacion, clientes con su NIT y el valor del
+// inventario. Con el comodin, cualquier pagina que la victima abra podria leer
+// todo eso desde su navegador. Lista blanca explicita o nada.
+//
+// Tampoco AllowCredentials: no hay cookies ni sesiones que enviar. Cuando
+// llegue la autenticacion habra que anadirlo, y entonces el comodin de origenes
+// pasa a ser directamente ilegal para el navegador.
+// -----------------------------------------------------------------------------
+const string PoliticaCors = "FrontendColorsin";
+
+var origenesPermitidos = (builder.Configuration
+        .GetSection("Cors:OrigenesPermitidos")
+        .Get<string[]>() ?? [])
+    .Where(origen => !string.IsNullOrWhiteSpace(origen))
+    // La barra final es el error clasico de CORS: WithOrigins compara el texto
+    // tal cual, y "http://localhost:5173/" no coincide nunca con el Origin que
+    // manda el navegador, que va sin barra. Falla en silencio.
+    .Select(origen => origen.Trim().TrimEnd('/'))
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
+
+if (origenesPermitidos.Length > 0)
+{
+    builder.Services.AddCors(opciones =>
+        opciones.AddPolicy(PoliticaCors, politica => politica
+            .WithOrigins(origenesPermitidos)
+            .AllowAnyHeader()
+            .AllowAnyMethod()));
+}
+
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -147,6 +202,36 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+// -----------------------------------------------------------------------------
+// CORS, despues de UseHttpsRedirection y antes de las rutas.
+//
+// Si no hay origenes configurados no se registra ninguna politica y la API
+// queda sin cabeceras CORS. Eso NO es un fallo: el navegador bloquea por
+// defecto, que es el comportamiento seguro. Se avisa en el log para que nadie
+// pierda una tarde depurando por que el frontend recibe un error de CORS.
+//
+// OJO CON LA REDIRECCION A HTTPS. Si la API escucha en https y el frontend la
+// llama por http, la peticion de sondeo (el OPTIONS previo) recibe un 307 y el
+// navegador no lo sigue: da error de CORS aunque el origen este permitido. Con
+// el perfil `http` de launchSettings no pasa, porque no hay puerto https
+// configurado y UseHttpsRedirection no hace nada. Con el perfil `https`, apunta
+// el frontend a https://localhost:7055.
+// -----------------------------------------------------------------------------
+if (origenesPermitidos.Length > 0)
+{
+    app.UseCors(PoliticaCors);
+    app.Logger.LogInformation(
+        "CORS habilitado para {Cantidad} origen(es): {Origenes}",
+        origenesPermitidos.Length,
+        string.Join(", ", origenesPermitidos));
+}
+else
+{
+    app.Logger.LogWarning(
+        "CORS deshabilitado: no hay origenes en 'Cors:OrigenesPermitidos'. " +
+        "Una pagina servida desde otro origen no podra llamar a esta API.");
+}
 
 // Verificacion rapida de que la API alcanza la base y el mapeo responde.
 app.MapGet("/health/db", async (AppDbContext db) =>
@@ -168,5 +253,16 @@ app.MapGet("/health/db", async (AppDbContext db) =>
     });
 })
 .WithName("HealthDb");
+
+// -----------------------------------------------------------------------------
+// Endpoints del tablero: /api/dashboard/*
+//
+// Van en su propio archivo y no aqui abajo porque Program.cs ya hace bastante
+// -configuracion, cadena de conexion, seis modulos de inyeccion- y mezclar las
+// rutas de cada modulo lo volveria imposible de leer. Cuando los demas modulos
+// expongan HTTP, cada uno traera su propio Map*Endpoints y esta seccion sera una
+// lista de llamadas.
+// -----------------------------------------------------------------------------
+app.MapDashboardEndpoints();
 
 app.Run();

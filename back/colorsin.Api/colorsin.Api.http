@@ -1,6 +1,73 @@
-@colorsin.Api_HostAddress = http://localhost:5121
+@host = http://localhost:5121
 
-GET {{colorsin.Api_HostAddress}}/weatherforecast/
+### Conexion con MySQL y conteo de las tablas base
+GET {{host}}/health/db
 Accept: application/json
 
-###
+
+# =============================================================================
+# DASHBOARD
+#
+# Todo es de solo lectura. Los parametros son opcionales: sin ninguno, cada
+# endpoint responde por toda la red.
+# =============================================================================
+
+### Resumen general - toda la red
+GET {{host}}/api/dashboard/resumen
+Accept: application/json
+
+### Resumen general - solo la matriz de Cali
+GET {{host}}/api/dashboard/resumen?sucursalId=1
+Accept: application/json
+
+### Resumen general - cierre de un dia pasado
+GET {{host}}/api/dashboard/resumen?fechaCorte=2026-09-15
+Accept: application/json
+
+
+### Ventas - mes en curso (sin fechas, toma el mes actual)
+GET {{host}}/api/dashboard/ventas
+Accept: application/json
+
+### Ventas - rango explicito, las dos fechas incluidas
+GET {{host}}/api/dashboard/ventas?desde=2026-09-01&hasta=2026-09-30
+Accept: application/json
+
+### Ventas - una sede, con rankings de 3
+GET {{host}}/api/dashboard/ventas?desde=2026-09-01&hasta=2026-09-30&sucursalId=1&top=3
+Accept: application/json
+
+### Ventas - rango al reves: responde en ceros, no con error
+GET {{host}}/api/dashboard/ventas?desde=2026-09-30&hasta=2026-09-01
+Accept: application/json
+
+
+### Inventario - toda la red, vencimientos a 30 dias
+GET {{host}}/api/dashboard/inventario
+Accept: application/json
+
+### Inventario - horizonte de un ano y mas lotes
+GET {{host}}/api/dashboard/inventario?dias=365&topLotes=20
+Accept: application/json
+
+### Inventario - una sede, con los ultimos 5 movimientos
+GET {{host}}/api/dashboard/inventario?sucursalId=2&topMovimientos=5
+Accept: application/json
+
+
+### Transferencias - toda la red
+GET {{host}}/api/dashboard/transferencias
+Accept: application/json
+
+### Transferencias - una sede (cuenta si es origen O destino)
+GET {{host}}/api/dashboard/transferencias?sucursalId=2&topNovedades=5
+Accept: application/json
+
+
+# =============================================================================
+# Documentacion OpenAPI generada. Solo responde con ASPNETCORE_ENVIRONMENT=Development.
+# =============================================================================
+
+### Esquema OpenAPI
+GET {{host}}/openapi/v1.json
+Accept: application/json
