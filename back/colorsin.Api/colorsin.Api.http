@@ -6,6 +6,75 @@ Accept: application/json
 
 
 # =============================================================================
+# AUTENTICACION
+#
+# Las claves de abajo son de DESARROLLO y estan en el repositorio, en
+# infra/mysql/init/07_seed_data.sql. Cambialas antes de exponer nada.
+#
+# El login guarda el token en la variable {{token}}, que usan las peticiones
+# siguientes. Ejecuta el login primero.
+# =============================================================================
+
+### Entrar como Administrador General (sin sede: ve toda la red)
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "marcela.ospina@colorsin.com.co",
+  "password": "Colorsin.Dev.Admin1"
+}
+
+###
+@token = {{login.response.body.token}}
+
+### Entrar como Gerente de Sucursal de Armenia (sede 2)
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "diana.carvajal@colorsin.com.co",
+  "password": "Colorsin.Dev.Gerente2"
+}
+
+### Entrar como Operador de Manizales (sede 3)
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "paola.guerrero@colorsin.com.co",
+  "password": "Colorsin.Dev.Operador2"
+}
+
+### Contrasena incorrecta -> 401
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "marcela.ospina@colorsin.com.co",
+  "password": "esta-no-es"
+}
+
+### Correo que no existe -> el MISMO 401, sin pistas
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "nadie@colorsin.com.co",
+  "password": "esta-no-es"
+}
+
+### Quien soy, segun el token
+GET {{host}}/api/auth/yo
+Authorization: Bearer {{token}}
+Accept: application/json
+
+### Quien soy, sin token -> 401
+GET {{host}}/api/auth/yo
+Accept: application/json
+
+
+# =============================================================================
 # DASHBOARD
 #
 # Todo es de solo lectura. Los parametros son opcionales: sin ninguno, cada

@@ -43,4 +43,20 @@ public sealed class UsuarioRepository : IUsuarioRepository
             .AsNoTracking()
             .Include(u => u.Sucursal)
             .FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
+
+    public Task<Usuario?> ObtenerPorEmailAsync(
+        string email,
+        CancellationToken cancellationToken = default) =>
+        _db.Usuarios
+            // SIN AsNoTracking, al contrario que las tres de arriba: si el hash
+            // hay que actualizarlo por costo, se modifica sobre esta misma
+            // instancia y basta con guardar.
+            .Include(u => u.Sucursal)
+            // Comparacion directa: la intercalacion de la columna
+            // (utf8mb4_0900_ai_ci) ya ignora mayusculas, y asi la consulta usa el
+            // indice unico uq_usuarios_email en vez de recorrer la tabla.
+            .FirstOrDefaultAsync(u => u.Email == email, cancellationToken);
+
+    public Task<int> GuardarCambiosAsync(CancellationToken cancellationToken = default) =>
+        _db.SaveChangesAsync(cancellationToken);
 }

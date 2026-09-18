@@ -89,30 +89,57 @@ ON DUPLICATE KEY UPDATE
 --    concreta, manda sobre toda la red. La columna es nullable justamente por
 --    este caso.
 --
---    ATENCION CON LA CONTRASENA
---    `password_hash` NO lleva un hash real: lleva un texto marcado que no
---    corresponde a ninguna contrasena y que ningun verificador va a aceptar.
---    Es deliberado. Sembrar credenciales que funcionan deja cinco cuentas con
---    clave conocida en cualquier entorno donde se corra este script, incluido
---    uno que termine expuesto.
+--    ================== CONTRASENAS: LEER ANTES DE DESPLEGAR ==================
 --
---    Consecuencia: estas cuentas NO pueden iniciar sesion. Hay que generar el
---    hash real (BCrypt o Argon2) al montar la autenticacion. Y ojo, el
---    verificador debe tolerar un hash con formato invalido sin reventar:
---    BCrypt.Net lanza SaltParseException ante una cadena que no es un hash, y
---    eso saldria como error 500 en vez de como credenciales incorrectas.
+--    Estas cinco cuentas SI pueden iniciar sesion, con claves de DESARROLLO que
+--    estan escritas aqui abajo y por tanto en el repositorio. Es a proposito:
+--    sin credenciales que funcionen no hay forma de probar el sistema, y el
+--    marcador que habia antes impedia entrar a todo el mundo.
+--
+--    Lo que eso significa: CUALQUIERA QUE VEA ESTE ARCHIVO PUEDE ENTRAR a
+--    cualquier entorno donde se haya corrido este script sin cambiar las
+--    claves. Antes de exponer la API a una red que no sea la tuya, cambialas.
+--
+--      id 1  marcela.ospina@colorsin.com.co   Colorsin.Dev.Admin1
+--      id 2  julian.restrepo@colorsin.com.co  Colorsin.Dev.Gerente1
+--      id 3  diana.carvajal@colorsin.com.co   Colorsin.Dev.Gerente2
+--      id 4  hector.zapata@colorsin.com.co    Colorsin.Dev.Operador1
+--      id 5  paola.guerrero@colorsin.com.co   Colorsin.Dev.Operador2
+--
+--    Los hash son BCrypt con costo 12 ($2a$12$...), calculados con el mismo
+--    servicio que usa la API. Llevan la sal dentro, asi que los cinco son
+--    distintos aunque las claves se parezcan, y volver a generarlos da valores
+--    distintos cada vez: no se pueden comparar dos hash entre si.
+--
+--    Una clave por usuario, y no una compartida, para que probar el filtro por
+--    sede no obligue a compartir credencial entre roles.
+--
+--    Para cambiar una: genera el hash con el mismo algoritmo y actualiza la
+--    fila. NO escribas la contrasena en claro en la columna: el verificador la
+--    rechazaria igual, porque no tiene formato de hash.
+--
+--    OJO, el caso que ya estaba documentado aqui y sigue vigente: si una fila
+--    queda con algo que no es un hash valido, BCrypt.Net lanza
+--    SaltParseException. El verificador de Colorsin lo atrapa y lo trata como
+--    credenciales incorrectas; si algun dia se cambia de libreria, hay que
+--    conservar ese comportamiento o un dato malo saldra como error 500.
 -- -----------------------------------------------------------------------------
 INSERT INTO `usuarios` (`id`, `nombre`, `email`, `password_hash`, `rol`, `sucursal_id`) VALUES
+  -- clave de desarrollo: Colorsin.Dev.Admin1
   (1, 'Marcela Ospina Rivera',  'marcela.ospina@colorsin.com.co',
-      'SIN_HASH__SEMBRADO__DEFINIR_ANTES_DE_HABILITAR_LOGIN', 'Administrador General', NULL),
+      '$2a$12$RQaJKbPITv0WzikM7dJFoOKmLWAU/JxHLYc9MAUHuMOGNGTjnspEW', 'Administrador General', NULL),
+  -- clave de desarrollo: Colorsin.Dev.Gerente1
   (2, 'Julián Restrepo Cano',   'julian.restrepo@colorsin.com.co',
-      'SIN_HASH__SEMBRADO__DEFINIR_ANTES_DE_HABILITAR_LOGIN', 'Gerente de Sucursal',   1),
+      '$2a$12$OGC2/iNVss14vtfVpNk/gOcG2.gHZ.wWg7mS5QInNvv/PeXb960oO', 'Gerente de Sucursal',   1),
+  -- clave de desarrollo: Colorsin.Dev.Gerente2
   (3, 'Diana Carvajal Londoño', 'diana.carvajal@colorsin.com.co',
-      'SIN_HASH__SEMBRADO__DEFINIR_ANTES_DE_HABILITAR_LOGIN', 'Gerente de Sucursal',   2),
+      '$2a$12$.tOSx7cY1UPYR/6uZuOp3ermS52Sa4L4tvip9AzRlxbq2w78AyZI2', 'Gerente de Sucursal',   2),
+  -- clave de desarrollo: Colorsin.Dev.Operador1
   (4, 'Héctor Zapata Muñoz',    'hector.zapata@colorsin.com.co',
-      'SIN_HASH__SEMBRADO__DEFINIR_ANTES_DE_HABILITAR_LOGIN', 'Operador',              1),
+      '$2a$12$0mkFNvEdno2dmXKAQKGtIOCVry8LaQm99ravYub5hWkDviA89hFLu', 'Operador',              1),
+  -- clave de desarrollo: Colorsin.Dev.Operador2
   (5, 'Paola Guerrero Salas',   'paola.guerrero@colorsin.com.co',
-      'SIN_HASH__SEMBRADO__DEFINIR_ANTES_DE_HABILITAR_LOGIN', 'Operador',              3)
+      '$2a$12$R8qGJZXWnyA/I3kqPRJgGu/zXknXKIu14P/PexWn9sBfPOo7B90NC', 'Operador',              3)
 AS nuevo
 ON DUPLICATE KEY UPDATE
   `nombre`      = nuevo.`nombre`,

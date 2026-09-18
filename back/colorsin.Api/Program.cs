@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using System.Text;
 using Colorsin.Api.Endpoints;
 using Colorsin.Application.Comun.Auditoria;
 using Colorsin.Application.Comun.Repositories;
@@ -19,7 +21,10 @@ using Colorsin.Infrastructure.Persistence.Repositories.Compras;
 using Colorsin.Infrastructure.Persistence.Repositories.Dashboard;
 using Colorsin.Infrastructure.Persistence.Repositories.Transferencias;
 using Colorsin.Infrastructure.Persistence.Repositories.Ventas;
+using Colorsin.Infrastructure.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -172,6 +177,78 @@ builder.Services.AddScoped<IDashboardService, DashboardService>();
 // llegue la autenticacion habra que anadirlo, y entonces el comodin de origenes
 // pasa a ser directamente ilegal para el navegador.
 // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// Autenticacion con JWT.
+//
+// Los ajustes se leen UNA vez, aqui, y el mismo objeto configura la validacion.
+// El generador vuelve a leerlos por su cuenta desde IConfiguration, pero con la
+// misma funcion: es lo que garantiza que se firme y se valide con la misma
+// clave. Si esto se separara, el sintoma de una discrepancia seria un 401 en
+// todas las peticiones sin ninguna pista del motivo.
+//
+// CargarDesde lanza si la clave falta, es el marcador del appsettings versionado
+// o no llega a 32 bytes. Es deliberado que tumbe el arranque: una clave mal
+// configurada es un error de despliegue, y vale mas que el servicio no levante a
+// que levante emitiendo tokens que nadie puede validar.
+// -----------------------------------------------------------------------------
+var ajustesJwt = JwtSettings.CargarDesde(builder.Configuration);
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(opciones =>
+    {
+        // Lo que se escribio es lo que se lee. Con la traduccion activada -que es
+        // el valor por defecto, por compatibilidad- el manejador reescribe los
+        // nombres cortos de los claims a las URI largas de ClaimTypes al
+        // validar. Como el generador ya escribe las URI largas, traducir encima
+        // solo anade una capa de sorpresas; ver la nota de JwtTokenGenerator.
+        opciones.MapInboundClaims = false;
+
+        opciones.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = ajustesJwt.Issuer,
+
+            ValidateAudience = true,
+            ValidAudience = ajustesJwt.Audience,
+
+            // Lo unico que de verdad impide falsificar un token. Sin esto, la
+            // API aceptaria cualquier JSON con la forma correcta.
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(ajustesJwt.ClaveSecreta)),
+
+            ValidateLifetime = true,
+
+            // Por defecto son CINCO MINUTOS de tolerancia, pensados para relojes
+            // de servidores distintos. Aqui emisor y validador son el mismo
+            // proceso, asi que ese margen solo alarga la vida real de cada token.
+            ClockSkew = TimeSpan.FromSeconds(30),
+
+            // Explicitos para que [Authorize(Roles = ...)] y User.Identity.Name
+            // miren los mismos claims que escribe el generador, y no dependan de
+            // los valores por defecto del manejador.
+            NameClaimType = ClaimTypes.Name,
+            RoleClaimType = ClaimTypes.Role
+        };
+    });
+
+// Hace falta aparte de AddAuthentication: sin esto, UseAuthorization no tiene
+// los servicios que necesita y falla al construir la aplicacion.
+builder.Services.AddAuthorization();
+
+// Singleton los dos, a diferencia del resto de servicios del proyecto: no
+// dependen del AppDbContext ni de nada con alcance de peticion. El generador lee
+// la configuracion y arma las credenciales de firma una sola vez; el hasher no
+// guarda estado ninguno. Despues son inmutables y seguros entre hilos.
+builder.Services.AddSingleton<IJwtTokenGenerator, JwtTokenGenerator>();
+builder.Services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
+
+// Scoped, este si: comparte el AppDbContext de la peticion con el repositorio de
+// usuarios y con la auditoria, que es lo que hace que el evento del inicio de
+// sesion y la posible actualizacion del hash se confirmen en el mismo guardado.
+builder.Services.AddScoped<IAuthService, AuthService>();
+
 const string PoliticaCors = "FrontendColorsin";
 
 var origenesPermitidos = (builder.Configuration
@@ -233,6 +310,27 @@ else
         "Una pagina servida desde otro origen no podra llamar a esta API.");
 }
 
+// -----------------------------------------------------------------------------
+// Autenticacion y autorizacion, en este orden y despues de CORS.
+//
+// El orden no es una convencion, es una dependencia:
+//
+//   UseCors           primero, porque el sondeo previo (OPTIONS) lo manda el
+//                     navegador SIN cabecera Authorization. Si la autenticacion
+//                     fuera antes, ese sondeo se respondria 401 y el navegador
+//                     ni siquiera llegaria a mandar la peticion real: daria
+//                     error de CORS por lo que en realidad es un 401.
+//   UseAuthentication luego, que es quien lee el token y arma el usuario.
+//   UseAuthorization  al final, porque decide con ese usuario ya armado. Al
+//                     reves siempre veria un anonimo y rechazaria todo.
+//
+// Registrarlos no cierra nada por si solo: un endpoint sigue siendo publico
+// mientras no lleve [Authorize] o .RequireAuthorization(). De momento lo son
+// todos.
+// -----------------------------------------------------------------------------
+app.UseAuthentication();
+app.UseAuthorization();
+
 // Verificacion rapida de que la API alcanza la base y el mapeo responde.
 app.MapGet("/health/db", async (AppDbContext db) =>
 {
@@ -263,6 +361,7 @@ app.MapGet("/health/db", async (AppDbContext db) =>
 // expongan HTTP, cada uno traera su propio Map*Endpoints y esta seccion sera una
 // lista de llamadas.
 // -----------------------------------------------------------------------------
+app.MapAuthEndpoints();
 app.MapDashboardEndpoints();
 
 app.Run();
