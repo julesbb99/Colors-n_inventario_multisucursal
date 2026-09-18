@@ -2,9 +2,24 @@ using Colorsin.Application.Inventario.DTOs;
 
 namespace Colorsin.Application.Inventario.Services;
 
-/// <summary>Operaciones de stock: consulta, movimientos y alertas.</summary>
+/// <summary>Operaciones de stock: catalogo, consulta, movimientos y alertas.</summary>
 public interface IInventarioService
 {
+    /// <summary>
+    /// Catalogo de productos, con su unidad base resuelta.
+    ///
+    /// NO SE FILTRA POR SEDE, y no es un descuido: el catalogo es de la red. Que
+    /// una sede no tenga saldo de un producto no significa que no lo maneje, y
+    /// esconderselo impediria pedirlo por traslado o comprarlo, que es justo lo
+    /// que hace falta cuando no hay. Lo que si es por sede son las existencias.
+    /// </summary>
+    /// <param name="categoria">
+    /// Filtra por categoria exacta. Nulo o vacio trae el catalogo completo.
+    /// </param>
+    Task<IReadOnlyList<ProductoDto>> ObtenerProductosAsync(
+        string? categoria = null,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Existencias de una sede, o de toda la red si no se indica sede.</summary>
     Task<IReadOnlyList<InventarioSucursalDto>> ObtenerExistenciasAsync(
         int? sucursalId = null,

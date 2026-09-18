@@ -78,4 +78,27 @@ public interface IUsuarioContexto
     /// cae entero y sin ruido.
     /// </summary>
     int? ResolverFiltroSucursal(int? sucursalIdSolicitado);
+
+    /// <summary>
+    /// La contraparte de <see cref="ResolverFiltroSucursal"/> para las
+    /// ESCRITURAS. Lanza <see cref="AccesoDenegadoException"/> si quien pide no
+    /// puede operar sobre esa sede.
+    ///
+    /// Son dos metodos y no uno porque el caso omiso no significa lo mismo:
+    /// consultar sin decir sede es una peticion valida que se acota, mientras
+    /// que operar exige siempre una sede concreta -la de la venta, la del
+    /// movimiento- y ahi no hay nada que acotar, solo que permitir o negar.
+    /// </summary>
+    void ExigirAccesoASucursal(int sucursalId);
+
+    /// <summary>
+    /// Igual, pero basta con poder operar sobre UNA de las dos.
+    ///
+    /// Es para los traslados, donde hay dos sedes implicadas y segun la
+    /// operacion manda una u otra. Cuando la operacion tiene un lado claro
+    /// -despachar es del origen, recibir es del destino- se usa
+    /// <see cref="ExigirAccesoASucursal"/> con ese lado. Este es para las que
+    /// puede hacer cualquiera de los dos extremos, como reportar una novedad.
+    /// </summary>
+    void ExigirAccesoAAlgunaDe(int sucursalA, int sucursalB);
 }

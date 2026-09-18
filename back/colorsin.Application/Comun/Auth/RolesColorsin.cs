@@ -36,6 +36,21 @@ public static class RolesColorsin
     public const string Operador = "Operador";
 
     /// <summary>
+    /// Los roles que DECIDEN, frente al que ejecuta: comprometer dinero, cerrar
+    /// un documento, ajustar stock a mano.
+    ///
+    /// La lista vive aqui y no en la politica de autorizacion de la API porque
+    /// hace falta en dos sitios -la politica y alguna comprobacion dentro de un
+    /// endpoint, cuando depende del contenido de la peticion- y dos copias de la
+    /// misma lista es como una termina diciendo algo distinto de la otra.
+    /// </summary>
+    public static readonly string[] Supervision = [AdminGeneral, GerenteSucursal];
+
+    /// <summary>Si ese rol es de los que deciden. Un rol nulo o desconocido, no.</summary>
+    public static bool EsSupervision(string? rol) =>
+        rol is not null && Array.Exists(Supervision, r => string.Equals(r, rol, StringComparison.Ordinal));
+
+    /// <summary>
     /// El rol del dominio, como cadena para el claim.
     ///
     /// Lanza si aparece un rol sin equivalencia, en vez de devolver algo por

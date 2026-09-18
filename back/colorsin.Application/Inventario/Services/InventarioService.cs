@@ -35,6 +35,19 @@ public sealed class InventarioService : IInventarioService
     // CONSULTAS
     // =========================================================================
 
+    public async Task<IReadOnlyList<ProductoDto>> ObtenerProductosAsync(
+        string? categoria = null,
+        CancellationToken cancellationToken = default)
+    {
+        // Dos consultas distintas y no una con filtro opcional, porque el
+        // repositorio ya las tiene separadas y cada una tiene su propio orden.
+        var productos = string.IsNullOrWhiteSpace(categoria)
+            ? await _productos.ObtenerTodosAsync(cancellationToken)
+            : await _productos.ObtenerPorCategoriaAsync(categoria.Trim(), cancellationToken);
+
+        return productos.Select(p => p.ToDto()).ToList();
+    }
+
     public async Task<IReadOnlyList<InventarioSucursalDto>> ObtenerExistenciasAsync(
         int? sucursalId = null,
         CancellationToken cancellationToken = default)

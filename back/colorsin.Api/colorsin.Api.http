@@ -23,6 +23,23 @@ Accept: application/json
 #
 # El login guarda el token en la variable {{token}}, que usan las peticiones
 # siguientes. Ejecuta el login primero.
+#
+# QUE PUEDE HACER CADA ROL. Hay DOS comprobaciones y las dos dan 403:
+#
+#   por SEDE   operar sobre una sede que no es la tuya           (todos los roles)
+#   por ROL    operaciones de supervision                        (niega al Operador)
+#
+#   Solo AdminGeneral y GerenteSucursal:
+#     GET  /api/comun/usuarios
+#     POST /api/inventario/movimientos          (ajustes y mermas a mano)
+#     POST /api/compras/ordenes
+#     POST /api/compras/ordenes/{id}/recepciones
+#     POST /api/transferencias/{id}/rechazo
+#     POST /api/transferencias/{id}/cancelacion
+#     POST /api/transferencias/{id}/novedades   SOLO si tipo es Faltante o Averia
+#
+#   El Operador ademas de las consultas puede: registrar ventas, solicitar
+#   traslados, despacharlos, recibirlos y reportar novedades no criticas.
 # =============================================================================
 
 ### Entrar como Administrador General (sin sede: ve toda la red)
@@ -171,6 +188,246 @@ Accept: application/json
 ### Sin token -> 401
 GET {{host}}/api/dashboard/resumen
 Accept: application/json
+
+
+# =============================================================================
+# CATALOGOS (Comun y Productos)
+#
+# Son los desplegables de los formularios: sin ellos no se puede armar una linea
+# de compra, venta o traslado, porque hay que elegir una unidad.
+# =============================================================================
+
+### Sedes de la red. Salen todas, tambien a un operador: para pedir un traslado
+### hay que poder nombrar la sede de la que se pide.
+GET {{host}}/api/comun/sucursales
+Authorization: Bearer {{token}}
+
+### Unidades de medida, con su factor a litros.
+### El frontend NO convierte: manda la cantidad como la escribio la persona mas
+### su unidadId, y el servidor hace la aritmetica una sola vez.
+GET {{host}}/api/comun/unidades-medida
+Authorization: Bearer {{token}}
+
+### Usuarios, para asignaciones. Solo AdminGeneral y GerenteSucursal (403 al
+### Operador). Un gerente ve solo el equipo de su sede.
+GET {{host}}/api/comun/usuarios
+Authorization: Bearer {{token}}
+
+### Catalogo de productos con su unidad base. De toda la red, sin filtro de sede.
+GET {{host}}/api/productos
+Authorization: Bearer {{token}}
+
+### Filtrado por categoria (coincidencia exacta)
+GET {{host}}/api/productos?categoria=Solvente
+Authorization: Bearer {{token}}
+
+
+# =============================================================================
+# INVENTARIO
+# =============================================================================
+
+### Existencias (acotadas a tu sede si no eres admin)
+GET {{host}}/api/inventario/existencias
+Authorization: Bearer {{token}}
+
+### Productos por debajo del minimo
+GET {{host}}/api/inventario/alertas
+Authorization: Bearer {{token}}
+
+### Libro mayor
+GET {{host}}/api/inventario/movimientos?limite=20
+Authorization: Bearer {{token}}
+
+### Lotes en orden FEFO: el primero es el que se debe despachar
+GET {{host}}/api/inventario/lotes?sucursalId=1&productoId=2
+Authorization: Bearer {{token}}
+
+### Registrar un ingreso. Fijate que NO se manda usuarioId: sale del token.
+POST {{host}}/api/inventario/movimientos
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "sucursalId": 1,
+  "productoId": 2,
+  "tipoMovimiento": 0,
+  "motivo": 2,
+  "cantidad": 10,
+  "unidadId": 1,
+  "observaciones": "ajuste de conteo"
+}
+
+### Retiro mayor que el saldo -> 409, y no queda nada registrado
+POST {{host}}/api/inventario/movimientos
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "sucursalId": 1, "productoId": 2, "tipoMovimiento": 1, "motivo": 2,
+  "cantidad": 999999, "unidadId": 1
+}
+
+
+# =============================================================================
+# COMPRAS
+# =============================================================================
+
+### Proveedores
+GET {{host}}/api/compras/proveedores
+Authorization: Bearer {{token}}
+
+### Ordenes
+GET {{host}}/api/compras/ordenes
+Authorization: Bearer {{token}}
+
+### Crear una orden (nace Pendiente, no mueve stock)
+# @name orden
+POST {{host}}/api/compras/ordenes
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "proveedorId": 2,
+  "sucursalId": 1,
+  "plazoPagoDias": 30,
+  "lineas": [
+    { "productoId": 2, "cantidad": 100, "unidadId": 1, "precioUnitario": 22500, "descuento": 0 }
+  ]
+}
+
+###
+@ordenId = {{orden.response.body.ordenCompraId}}
+
+### Recibir la orden. Cuerpo vacio = llego todo lo que faltaba.
+POST {{host}}/api/compras/ordenes/{{ordenId}}/recepciones
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "lineas": [
+    { "detalleId": 1, "numeroLote": "DTM-2026-501", "fechaVencimiento": "2029-12-31" }
+  ]
+}
+
+
+# =============================================================================
+# VENTAS
+# =============================================================================
+
+### Clientes
+GET {{host}}/api/ventas/clientes
+Authorization: Bearer {{token}}
+
+### Buscar por cedula o NIT (la busqueda del mostrador)
+GET {{host}}/api/ventas/clientes/documento/901345678-2
+Authorization: Bearer {{token}}
+
+### Ventas registradas
+GET {{host}}/api/ventas
+Authorization: Bearer {{token}}
+
+### Registrar una venta. Descuenta stock por FEFO en la misma transaccion.
+POST {{host}}/api/ventas
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "clienteId": 1,
+  "sucursalId": 1,
+  "lineas": [
+    { "productoId": 2, "cantidad": 30, "unidadId": 1, "precioUnitario": 28000, "descuento": 0 }
+  ]
+}
+
+### Venta sin stock -> 409
+POST {{host}}/api/ventas
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "clienteId": 1, "sucursalId": 1,
+  "lineas": [ { "productoId": 2, "cantidad": 999999, "unidadId": 1, "precioUnitario": 28000 } ]
+}
+
+
+# =============================================================================
+# TRANSFERENCIAS
+#
+# El ciclo necesita DOS usuarios: la sede destino solicita y recibe, la sede
+# origen despacha. Con un solo token, los pasos de la otra sede dan 403.
+# =============================================================================
+
+### Transportadoras
+GET {{host}}/api/transferencias/transportadoras
+Authorization: Bearer {{token}}
+
+### Traslados (si eres de sede, ves los que envias Y los que recibes)
+GET {{host}}/api/transferencias
+Authorization: Bearer {{token}}
+
+### Solicitar. Lo pide el DESTINO: entra con el token de Diana (sede 2).
+# @name traslado
+POST {{host}}/api/transferencias
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "productoId": 2,
+  "sucursalOrigenId": 1,
+  "sucursalDestinoId": 2,
+  "cantidad": 40,
+  "unidadId": 1,
+  "urgencia": 1
+}
+
+###
+@trasladoId = {{traslado.response.body.transferenciaId}}
+
+### Despachar. Lo hace el ORIGEN: entra con el token de Julian (sede 1).
+POST {{host}}/api/transferencias/{{trasladoId}}/despacho
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "transportadoraId": 2,
+  "guia": "GU-100234"
+}
+
+### Recibir. Lo hace el DESTINO. Sin cantidadRecibida llega todo lo despachado.
+POST {{host}}/api/transferencias/{{trasladoId}}/recepcion
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{}
+
+### Reportar una novedad. Cualquiera de las dos sedes. No mueve stock.
+POST {{host}}/api/transferencias/{{trasladoId}}/novedades
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "tipo": 1,
+  "cantidadAfectada": 2,
+  "observaciones": "dos latas abolladas, contenido intacto"
+}
+
+### Rechazar (solo el ORIGEN, y solo desde Solicitada)
+POST {{host}}/api/transferencias/{{trasladoId}}/rechazo
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "motivo": "no hay disponibilidad esta semana" }
+
+### Cancelar (cualquiera de las dos sedes, y solo desde Solicitada)
+POST {{host}}/api/transferencias/{{trasladoId}}/cancelacion
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "motivo": "ya no hace falta" }
+
+### Detalle con movimientos y novedades
+GET {{host}}/api/transferencias/{{trasladoId}}
+Authorization: Bearer {{token}}
 
 
 # =============================================================================

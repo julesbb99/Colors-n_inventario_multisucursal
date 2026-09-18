@@ -83,4 +83,43 @@ public sealed class UsuarioContextoHttp : IUsuarioContexto
 
         return sucursalPropia;
     }
+
+    public void ExigirAccesoASucursal(int sucursalId)
+    {
+        if (!PuedeOperarEn(sucursalId, out var propia))
+        {
+            throw new AccesoDenegadoException(
+                $"El usuario {UsuarioId} (rol '{Rol}', sede {propia?.ToString() ?? "ninguna"}) " +
+                $"intento operar sobre la sede {sucursalId}.");
+        }
+    }
+
+    public void ExigirAccesoAAlgunaDe(int sucursalA, int sucursalB)
+    {
+        if (!PuedeOperarEn(sucursalA, out var propia) && !PuedeOperarEn(sucursalB, out _))
+        {
+            throw new AccesoDenegadoException(
+                $"El usuario {UsuarioId} (rol '{Rol}', sede {propia?.ToString() ?? "ninguna"}) " +
+                $"intento operar sobre un traslado entre las sedes {sucursalA} y {sucursalB}, " +
+                "y no pertenece a ninguna de las dos.");
+        }
+    }
+
+    /// <summary>
+    /// Nucleo de las dos comprobaciones de escritura. Devuelve tambien la sede
+    /// propia para poder redactar el mensaje del log sin volver a leerla.
+    /// </summary>
+    private bool PuedeOperarEn(int sucursalId, out int? sucursalPropia)
+    {
+        sucursalPropia = SucursalId;
+
+        if (!EstaAutenticado)
+        {
+            return false;
+        }
+
+        // El administrador opera sobre cualquier sede, incluida una que no
+        // exista: eso lo rechazara la clave foranea, no la autorizacion.
+        return EsAdminGeneral || sucursalPropia == sucursalId;
+    }
 }

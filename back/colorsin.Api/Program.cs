@@ -239,8 +239,9 @@ builder.Services
     });
 
 // Hace falta aparte de AddAuthentication: sin esto, UseAuthorization no tiene
-// los servicios que necesita y falla al construir la aplicacion.
-builder.Services.AddAuthorization();
+// los servicios que necesita y falla al construir la aplicacion. De paso quedan
+// registradas las politicas por rol; ver PoliticasAutorizacion.
+builder.Services.AddAuthorization(opciones => opciones.AgregarPoliticasColorsin());
 
 // Singleton los dos, a diferencia del resto de servicios del proyecto: no
 // dependen del AppDbContext ni de nada con alcance de peticion. El generador lee
@@ -483,6 +484,11 @@ app.MapGet("/health/db", async (AppDbContext db) =>
 // lista de llamadas.
 // -----------------------------------------------------------------------------
 app.MapAuthEndpoints();
+app.MapComunEndpoints();
 app.MapDashboardEndpoints();
+app.MapInventarioEndpoints();
+app.MapComprasEndpoints();
+app.MapVentasEndpoints();
+app.MapTransferenciasEndpoints();
 
 app.Run();
