@@ -1,7 +1,7 @@
 import { createContext, useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { obtenerSucursales } from '../services/api';
+import { obtenerSucursales } from '../services/comun';
 import { mensajeDeError } from '../models/api';
 import type { SucursalDto } from '../models/comun';
 

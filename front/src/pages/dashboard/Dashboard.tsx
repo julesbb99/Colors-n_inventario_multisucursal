@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   CalendarClock,
@@ -8,66 +7,47 @@ import {
   Truck,
 } from 'lucide-react';
 import { useSede } from '../../hooks/useSede';
-import { obtenerLotesProximosAVencer, obtenerResumenGeneral } from '../../services/api';
-import { esApiError, mensajeDeError } from '../../models/api';
+import { useConsulta } from '../../hooks/useConsulta';
+import { obtenerResumenGeneral } from '../../services/dashboard';
+import { obtenerLotesProximosAVencer } from '../../services/inventario';
 import type { ResumenGeneralDto } from '../../models/dashboard';
 import type { LoteDto } from '../../models/inventario';
 import { TarjetaKpi } from '../../components/dashboard/TarjetaKpi';
 import { TablaAlertasVencimiento } from '../../components/dashboard/TablaAlertasVencimiento';
 import { Alerta } from '../../components/ui/Alerta';
 import { CargandoPanel } from '../../components/ui/Spinner';
-import { formatearCOP, formatearEntero, formatearFechaHora, formatearLitros } from '../../utils/formato';
+import {
+  formatearCOP,
+  formatearEntero,
+  formatearFechaHora,
+  formatearLitros,
+} from '../../utils/formato';
+
+/** Los dos bloques van juntos porque el umbral del resumen clasifica la tabla. */
+interface DatosPanel {
+  resumen: ResumenGeneralDto | null;
+  lotes: LoteDto[];
+}
+
+const VACIO: DatosPanel = { resumen: null, lotes: [] };
 
 export function Dashboard() {
   const { sedeActiva, nombreSedeActiva } = useSede();
 
-  const [resumen, setResumen] = useState<ResumenGeneralDto | null>(null);
-  const [lotes, setLotes] = useState<LoteDto[]>([]);
-  const [cargando, setCargando] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [esPermisos, setEsPermisos] = useState(false);
-
-  useEffect(() => {
-    let vigente = true;
-
-    setCargando(true);
-    setError(null);
-    setEsPermisos(false);
-
-    // Las dos consultas van en paralelo porque son independientes y ninguna
-    // necesita el resultado de la otra. `all` y no `allSettled`: si el resumen
-    // falla, la tabla sola no dice gran cosa, y media pantalla cargada confunde
-    // mas que un error claro.
-    Promise.all([obtenerResumenGeneral(sedeActiva), obtenerLotesProximosAVencer(sedeActiva)])
-      .then(([datosResumen, datosLotes]) => {
-        if (!vigente) {
-          return;
-        }
-        setResumen(datosResumen);
-        setLotes(datosLotes);
-      })
-      .catch((fallo: unknown) => {
-        if (!vigente) {
-          return;
-        }
-        setError(mensajeDeError(fallo));
-        setEsPermisos(esApiError(fallo) && fallo.esPermisos);
-        setResumen(null);
-        setLotes([]);
-      })
-      .finally(() => {
-        if (vigente) {
-          setCargando(false);
-        }
-      });
-
-    // Cambiar de sede dispara una consulta nueva antes de que llegue la
-    // anterior. Sin esta bandera, la respuesta lenta de la sede vieja pisaria a
-    // la rapida de la nueva y la pantalla mostraria cifras de otra sede.
-    return () => {
-      vigente = false;
-    };
-  }, [sedeActiva]);
+  const { datos, cargando, error, esPermisos } = useConsulta<DatosPanel>(
+    async () => {
+      // En paralelo porque son independientes. `all` y no `allSettled`: si el
+      // resumen falla, la tabla sola no dice gran cosa y media pantalla cargada
+      // confunde mas que un error claro.
+      const [resumen, lotes] = await Promise.all([
+        obtenerResumenGeneral(sedeActiva),
+        obtenerLotesProximosAVencer(sedeActiva),
+      ]);
+      return { resumen, lotes };
+    },
+    [sedeActiva],
+    VACIO,
+  );
 
   if (cargando) {
     return <CargandoPanel texto="Cargando el panel…" />;
@@ -76,6 +56,8 @@ export function Dashboard() {
   if (error) {
     return <Alerta tipo={esPermisos ? 'permisos' : 'error'}>{error}</Alerta>;
   }
+
+  const { resumen, lotes } = datos;
 
   if (!resumen) {
     return <Alerta tipo="info">No hay datos para mostrar.</Alerta>;
@@ -133,10 +115,10 @@ export function Dashboard() {
       <TablaAlertasVencimiento lotes={lotes} diasUmbral={resumen.diasUmbralVencimiento} />
 
       {/*
-        La hora de generacion no es decorativa: el tablero se recalcula en cada
-        llamada contra las tablas operativas, asi que dos lecturas seguidas pueden
-        diferir. Sin esta linea no hay forma de saber a que momento corresponde lo
-        que se esta mirando.
+        La hora de generación no es decorativa: el tablero se recalcula en cada
+        llamada contra las tablas operativas, así que dos lecturas seguidas pueden
+        diferir. Sin esta línea no hay forma de saber a qué momento corresponde lo
+        que se está mirando.
       */}
       <p className="text-xs text-slate-500">
         {nombreSedeActiva} · corte del {resumen.fechaCorte} · generado el{' '}

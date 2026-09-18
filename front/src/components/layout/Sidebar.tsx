@@ -31,10 +31,10 @@ interface ItemNav {
 const ITEMS: ItemNav[] = [
   { etiqueta: 'Dashboard', ruta: '/', Icono: LayoutDashboard, exacta: true },
   { etiqueta: 'Existencias', ruta: '/inventario/existencias', Icono: Boxes },
-  { etiqueta: 'Lotes FEFO', ruta: null, Icono: Layers },
-  { etiqueta: 'Traslados', ruta: null, Icono: ArrowLeftRight },
-  { etiqueta: 'Compras', ruta: null, Icono: ShoppingCart },
-  { etiqueta: 'Ventas', ruta: null, Icono: Receipt },
+  { etiqueta: 'Lotes FEFO', ruta: '/inventario/lotes', Icono: Layers },
+  { etiqueta: 'Traslados', ruta: '/traslados', Icono: ArrowLeftRight },
+  { etiqueta: 'Compras', ruta: '/compras', Icono: ShoppingCart },
+  { etiqueta: 'Ventas', ruta: '/ventas', Icono: Receipt },
   { etiqueta: 'Configuración', ruta: null, Icono: Settings },
 ];
 

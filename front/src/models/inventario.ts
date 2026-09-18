@@ -59,6 +59,61 @@ export interface LoteDto {
   vencido: boolean;
 }
 
+/**
+ * LOS ENUM DE ENTRADA VIAJAN COMO NUMERO.
+ *
+ * La API no registra `JsonStringEnumConverter`, asi que System.Text.Json espera
+ * el valor ordinal. Mandar `"Ingreso"` da un 400 que no dice cual campo fallo.
+ * El orden es el del enum del dominio y no se puede reordenar sin romper esto.
+ */
+export const TIPO_MOVIMIENTO = { ingreso: 0, retiro: 1 } as const;
+export type ValorTipoMovimiento = (typeof TIPO_MOVIMIENTO)[keyof typeof TIPO_MOVIMIENTO];
+
+export const MOTIVO_MOVIMIENTO = {
+  compra: 0,
+  venta: 1,
+  ajuste: 2,
+  transferencia: 3,
+  merma: 4,
+  devolucion: 5,
+} as const;
+export type ValorMotivoMovimiento =
+  (typeof MOTIVO_MOVIMIENTO)[keyof typeof MOTIVO_MOVIMIENTO];
+
+/**
+ * Un movimiento manual. El `usuarioId` NO va aqui: sale del token.
+ *
+ * Restringido a supervision: lo que entra por compras, sale por ventas o se
+ * mueve por traslados tiene su propio documento detras. Un movimiento a mano es
+ * la unica forma de cambiar el stock sin uno.
+ */
+export interface RegistrarMovimientoDto {
+  sucursalId: number;
+  productoId: number;
+  tipoMovimiento: ValorTipoMovimiento;
+  motivo: ValorMotivoMovimiento;
+  cantidad: number;
+  unidadId: number;
+  /** Imputa el movimiento a un lote concreto. Opcional. */
+  loteId?: number | null;
+  observaciones?: string | null;
+}
+
+/** Alta de un lote. Sin cantidad: nace vacio. */
+export interface CrearLoteDto {
+  productoId: number;
+  sucursalId: number;
+  numeroLote: string;
+  fechaVencimiento?: string | null;
+  fechaIngreso?: string | null;
+}
+
+/** Correccion de un lote. Es un PUT: `fechaVencimiento` nula BORRA la fecha. */
+export interface ActualizarLoteDto {
+  numeroLote: string;
+  fechaVencimiento?: string | null;
+}
+
 /** Los tres estados de caducidad que pinta la interfaz. */
 export type EstadoCaducidad = 'Vigente' | 'Por vencer' | 'Vencido';
 

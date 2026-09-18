@@ -2,8 +2,8 @@ import { createContext, useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react';
 import { jwtDecode } from 'jwt-decode';
 import { CLAVE_TOKEN, EVENTO_SESION_EXPIRADA } from '../interceptors/axiosInstance';
-import { iniciarSesion } from '../services/api';
-import { CLAIMS, ROLES } from '../models/auth';
+import { iniciarSesion } from '../services/auth';
+import { CLAIMS, ROLES, ROLES_SUPERVISION } from '../models/auth';
 import type { CustomJwtPayload, LoginRequest, Rol, Sesion } from '../models/auth';
 
 export interface AuthContextValue {
@@ -16,6 +16,15 @@ export interface AuthContextValue {
   sucursalId: number | null;
   estaAutenticado: boolean;
   esAdminGeneral: boolean;
+  /**
+   * Administración general o gerencia de sede: los roles que pueden comprometer
+   * dinero, cerrar un documento o ajustar stock a mano.
+   *
+   * Sirve para NO OFRECER un botón que la API va a rechazar con 403. No es el
+   * control: ese vive en el servidor, y seguiría negando aunque alguien llamara
+   * al endpoint por su cuenta.
+   */
+  esSupervision: boolean;
   login: (credenciales: LoginRequest) => Promise<void>;
   logout: () => void;
 }
@@ -150,6 +159,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       sucursalId: estado?.sesion.sucursalId ?? null,
       estaAutenticado: estado !== null,
       esAdminGeneral: estado?.sesion.rol === ROLES.adminGeneral,
+      esSupervision:
+        estado !== null && ROLES_SUPERVISION.includes(estado.sesion.rol),
       login,
       logout,
     }),
