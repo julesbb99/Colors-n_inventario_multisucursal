@@ -87,7 +87,7 @@ export function Dashboard() {
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
         <TarjetaKpi
-          etiqueta="Ventas del dia"
+          etiqueta="Ventas del día"
           valor={formatearCOP(resumen.ventasDelDia)}
           detalle={`${formatearEntero(resumen.cantidadVentasDelDia)} facturas`}
           Icono={DollarSign}
@@ -103,13 +103,13 @@ export function Dashboard() {
           valor={formatearLitros(resumen.saldoInventarioLitros)}
           detalle={
             resumen.productosSinConversionALitros > 0
-              ? `${alcance} · ${resumen.productosSinConversionALitros} saldos sin conversion`
+              ? `${alcance} · ${resumen.productosSinConversionALitros} saldos sin conversión`
               : alcance
           }
           Icono={Droplet}
         />
         <TarjetaKpi
-          etiqueta="En transito"
+          etiqueta="En tránsito"
           valor={formatearEntero(resumen.transferenciasEnTransito)}
           detalle="Traslados despachados sin recibir"
           Icono={Truck}
@@ -117,14 +117,14 @@ export function Dashboard() {
         <TarjetaKpi
           etiqueta="Stock bajo"
           valor={formatearEntero(resumen.alertasStockBajo)}
-          detalle="Saldos por debajo del minimo"
+          detalle="Saldos por debajo del mínimo"
           Icono={AlertTriangle}
           tono={resumen.alertasStockBajo > 0 ? 'alerta' : 'neutro'}
         />
         <TarjetaKpi
           etiqueta="Por vencer"
           valor={formatearEntero(resumen.alertasVencimiento)}
-          detalle={`Umbral de ${resumen.diasUmbralVencimiento} dias, vencidos incluidos`}
+          detalle={`Umbral de ${resumen.diasUmbralVencimiento} días, vencidos incluidos`}
           Icono={CalendarClock}
           tono={resumen.alertasVencimiento > 0 ? 'critico' : 'neutro'}
         />

@@ -24,9 +24,9 @@ export const AuthContext = createContext<AuthContextValue | undefined>(undefined
 
 /** Etiqueta legible de cada rol, para mostrar. No se usa para decidir permisos. */
 export const ETIQUETA_ROL: Record<Rol, string> = {
-  [ROLES.adminGeneral]: 'Administracion general',
+  [ROLES.adminGeneral]: 'Administración general',
   [ROLES.gerenteSucursal]: 'Gerencia de sede',
-  [ROLES.operador]: 'Operacion',
+  [ROLES.operador]: 'Operación',
 };
 
 /** Si el texto es uno de los tres roles conocidos. */
@@ -125,7 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // La API respondio 200 con un token que no se puede usar. Es un fallo del
       // servidor, no de las credenciales, y conviene que se note.
       throw new Error(
-        'La API devolvio un token que no se pudo leer. Revisa la configuracion de JwtSettings.',
+        'La API devolvió un token que no se pudo leer. Revisa la configuración de JwtSettings.',
       );
     }
 

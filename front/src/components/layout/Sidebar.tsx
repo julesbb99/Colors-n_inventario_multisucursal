@@ -1,75 +1,91 @@
 import { NavLink } from 'react-router-dom';
-import { Boxes, LayoutDashboard } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  Boxes,
+  Layers,
+  LayoutDashboard,
+  Receipt,
+  Settings,
+  ShoppingCart,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { ETIQUETA_ROL } from '../../context/AuthContext';
-import { useAuth } from '../../hooks/useAuth';
-import { useSede } from '../../hooks/useSede';
 
 interface ItemNav {
   etiqueta: string;
-  ruta: string;
+  /**
+   * Ruta destino, o `null` si la pantalla todavia no existe.
+   *
+   * Los cinco modulos con `null` ya tienen endpoints en la API pero no tienen
+   * pagina. Se listan igual -el menu completo comunica el alcance del sistema-
+   * pero NO como enlace: el enrutador manda cualquier ruta desconocida al panel,
+   * asi que un enlace a /compras devolveria al usuario al inicio sin explicacion,
+   * que se lee como un error de la aplicacion. Un elemento deshabilitado dice la
+   * verdad: existe, todavia no.
+   */
+  ruta: string | null;
   Icono: LucideIcon;
   /** `end` evita que "/" quede marcado como activo en todas las rutas hijas. */
   exacta?: boolean;
 }
 
-/**
- * Solo las dos pantallas que existen.
- *
- * No se listan Compras, Ventas ni Traslados aunque la API ya los expone: un menu
- * con enlaces que no llevan a ninguna parte es peor que un menu corto. Se agregan
- * cuando se construya cada pantalla.
- */
 const ITEMS: ItemNav[] = [
-  { etiqueta: 'Panel general', ruta: '/', Icono: LayoutDashboard, exacta: true },
+  { etiqueta: 'Dashboard', ruta: '/', Icono: LayoutDashboard, exacta: true },
   { etiqueta: 'Existencias', ruta: '/inventario/existencias', Icono: Boxes },
+  { etiqueta: 'Lotes FEFO', ruta: null, Icono: Layers },
+  { etiqueta: 'Traslados', ruta: null, Icono: ArrowLeftRight },
+  { etiqueta: 'Compras', ruta: null, Icono: ShoppingCart },
+  { etiqueta: 'Ventas', ruta: null, Icono: Receipt },
+  { etiqueta: 'Configuración', ruta: null, Icono: Settings },
 ];
 
+/**
+ * Clases comunes a todos los elementos del menu.
+ *
+ * El borde izquierdo va SIEMPRE, transparente cuando el elemento no esta activo:
+ * si solo lo llevara el activo, la fila se desplazaria cuatro pixeles al
+ * seleccionarla y el menu entero parpadearia en cada navegacion.
+ */
+const BASE_ITEM =
+  'flex h-11 items-center gap-3 border-l-4 pl-3 pr-3 text-sm transition';
+
 export function Sidebar() {
-  const { sesion, rol } = useAuth();
-  const { nombreSedeActiva } = useSede();
-
   return (
-    <aside className="flex w-60 shrink-0 flex-col bg-slate-900 px-3 py-5">
-      <div className="flex items-center gap-2.5 px-2 pb-6">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-colorsin-500 text-base font-black text-white">
-          C
-        </div>
-        <span className="text-lg font-bold tracking-tight text-white">Colorsin</span>
-      </div>
-
-      <nav aria-label="Secciones" className="flex flex-col gap-1">
-        {ITEMS.map(({ etiqueta, ruta, Icono, exacta }) => (
-          <NavLink
-            key={ruta}
-            to={ruta}
-            end={exacta}
-            className={({ isActive }) =>
-              `flex h-11 items-center gap-3 rounded-lg px-3 text-sm transition ${
-                isActive
-                  ? 'bg-colorsin-700 font-semibold text-white'
-                  : 'font-medium text-slate-300 hover:bg-slate-800 hover:text-white'
-              }`
-            }
-          >
-            <Icono size={18} aria-hidden="true" />
-            <span>{etiqueta}</span>
-          </NavLink>
-        ))}
+    <aside className="flex w-56 shrink-0 flex-col bg-petroleo-800 py-4">
+      <nav aria-label="Secciones" className="flex flex-col gap-0.5">
+        {ITEMS.map(({ etiqueta, ruta, Icono, exacta }) =>
+          ruta === null ? (
+            <button
+              key={etiqueta}
+              type="button"
+              disabled
+              title="Módulo pendiente de construir"
+              className={`${BASE_ITEM} w-full cursor-not-allowed border-transparent text-left font-medium text-petroleo-300/70`}
+            >
+              <Icono size={18} aria-hidden="true" />
+              <span className="flex-1">{etiqueta}</span>
+              <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+                pronto
+              </span>
+            </button>
+          ) : (
+            <NavLink
+              key={etiqueta}
+              to={ruta}
+              end={exacta}
+              className={({ isActive }) =>
+                `${BASE_ITEM} ${
+                  isActive
+                    ? 'border-terracota-500 bg-petroleo-700 font-semibold text-white'
+                    : 'border-transparent font-medium text-petroleo-100 hover:bg-petroleo-700/60 hover:text-white'
+                }`
+              }
+            >
+              <Icono size={18} aria-hidden="true" />
+              <span className="flex-1">{etiqueta}</span>
+            </NavLink>
+          ),
+        )}
       </nav>
-
-      <div className="flex-1" />
-
-      <div className="border-t border-slate-700 px-2 pt-4">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-          Sesion
-        </div>
-        <div className="mt-2 truncate text-sm font-semibold text-white">
-          {sesion?.nombre ?? ''}
-        </div>
-        <div className="truncate text-xs text-slate-400">{rol ? ETIQUETA_ROL[rol] : ''}</div>
-        <div className="mt-2.5 truncate text-xs text-slate-400">{nombreSedeActiva}</div>
-      </div>
     </aside>
   );
 }

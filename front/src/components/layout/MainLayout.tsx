@@ -11,9 +11,9 @@ interface Encabezado {
 /**
  * El encabezado de cada ruta.
  *
- * Vive aqui y no dentro de cada pantalla para que la cabecera sea parte del
- * marco: si cada pagina pintara su propia Navbar, dos de ellas podrian terminar
- * con espaciados distintos y el selector de sede se desalinearia al navegar.
+ * Vive aqui y no dentro de cada pantalla para que el titulo sea parte del marco:
+ * si cada pagina pintara el suyo, dos de ellas terminarian con espaciados
+ * distintos y el contenido bailaria al navegar.
  */
 const ENCABEZADOS: Record<string, Encabezado> = {
   '/': {
@@ -26,7 +26,7 @@ const ENCABEZADOS: Record<string, Encabezado> = {
   },
 };
 
-const POR_DEFECTO: Encabezado = { titulo: 'Colorsin', subtitulo: '' };
+const POR_DEFECTO: Encabezado = { titulo: 'Colorsín', subtitulo: '' };
 
 export function MainLayout() {
   const { pathname } = useLocation();
@@ -35,15 +35,27 @@ export function MainLayout() {
   return (
     // El proveedor de sede va AQUI y no en la raiz: carga el catalogo de
     // sucursales, que exige token. Colgado mas arriba se ejecutaria tambien en
-    // /login y respondería 401 antes de que nadie haya entrado.
+    // /login y responderia 401 antes de que nadie haya entrado.
     <SedeProvider>
-      <div className="flex h-screen overflow-hidden bg-slate-100">
-        <Sidebar />
+      <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
+        <Navbar />
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <Navbar titulo={encabezado.titulo} subtitulo={encabezado.subtitulo} />
+        <div className="flex min-h-0 flex-1">
+          <Sidebar />
 
-          <main className="flex-1 overflow-y-auto p-6">
+          {/* El scroll vive AQUI y no en el `body`: asi la barra superior y la
+              lateral quedan fijas y solo se desplaza el contenido, que es lo que
+              se espera de un tablero con tablas largas. */}
+          <main className="min-w-0 flex-1 overflow-y-auto bg-slate-50 px-6 py-5">
+            <div className="mb-5">
+              <h1 className="text-xl font-bold tracking-tight text-slate-900">
+                {encabezado.titulo}
+              </h1>
+              {encabezado.subtitulo ? (
+                <p className="mt-0.5 text-sm text-slate-500">{encabezado.subtitulo}</p>
+              ) : null}
+            </div>
+
             <Outlet />
           </main>
         </div>

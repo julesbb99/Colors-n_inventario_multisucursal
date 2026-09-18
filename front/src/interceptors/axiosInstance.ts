@@ -81,8 +81,8 @@ axiosInstance.interceptors.response.use(
       const fallo: ApiError = {
         estado: 0,
         mensaje:
-          'No se pudo contactar la API. Verifica que este levantada en ' +
-          `${import.meta.env.VITE_API_URL} y que el origen este permitido en CORS.`,
+          'No se pudo contactar la API. Verifica que esté levantada en ' +
+          `${import.meta.env.VITE_API_URL} y que el origen esté permitido en CORS.`,
         esPermisos: false,
         reintentarEnSegundos: null,
       };
@@ -100,7 +100,7 @@ axiosInstance.interceptors.response.use(
       if (esLogin(error.config)) {
         const fallo: ApiError = {
           estado,
-          mensaje: mensajeDelServidor(error, 'El correo o la contrasena no son correctos.'),
+          mensaje: mensajeDelServidor(error, 'El correo o la contraseña no son correctos.'),
           esPermisos: false,
           reintentarEnSegundos: null,
         };
@@ -112,7 +112,7 @@ axiosInstance.interceptors.response.use(
 
       const fallo: ApiError = {
         estado,
-        mensaje: 'Tu sesion expiro. Vuelve a iniciar sesion.',
+        mensaje: 'Tu sesión expiró. Vuelve a iniciar sesión.',
         esPermisos: false,
         reintentarEnSegundos: null,
       };
@@ -128,7 +128,7 @@ axiosInstance.interceptors.response.use(
         estado,
         mensaje: mensajeDelServidor(
           error,
-          'No tienes permiso para esta operacion. Puede ser por tu rol o porque ' +
+          'No tienes permiso para esta operación. Puede ser por tu rol o porque ' +
             'la sede consultada no es la tuya.',
         ),
         esPermisos: true,
@@ -159,7 +159,7 @@ axiosInstance.interceptors.response.use(
     // --- El resto ----------------------------------------------------------
     const fallo: ApiError = {
       estado,
-      mensaje: mensajeDelServidor(error, `La API respondio ${estado}.`),
+      mensaje: mensajeDelServidor(error, `La API respondió ${estado}.`),
       esPermisos: false,
       reintentarEnSegundos: null,
     };

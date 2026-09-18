@@ -36,5 +36,5 @@ export function mensajeDeError(valor: unknown): string {
   if (valor instanceof Error) {
     return valor.message;
   }
-  return 'Ocurrio un error inesperado.';
+  return 'Ocurrió un error inesperado.';
 }

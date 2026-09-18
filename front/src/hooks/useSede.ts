@@ -7,7 +7,7 @@ export function useSede(): SedeContextValue {
   const contexto = useContext(SedeContext);
 
   if (contexto === undefined) {
-    throw new Error('useSede se uso fuera de <SedeProvider>.');
+    throw new Error('useSede se usó fuera de <SedeProvider>.');
   }
 
   return contexto;

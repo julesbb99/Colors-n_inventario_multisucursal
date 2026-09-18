@@ -5,6 +5,7 @@ import { LogIn } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { esApiError, mensajeDeError } from '../../models/api';
 import { Alerta } from '../../components/ui/Alerta';
+import { Boton } from '../../components/ui/Boton';
 import { Spinner } from '../../components/ui/Spinner';
 
 interface EstadoNavegacion {
@@ -59,16 +60,23 @@ export function Login() {
     <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-10">
       <div className="w-full max-w-md">
         <div className="mb-7 flex items-center justify-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-colorsin-700 text-lg font-black text-white">
+          {/* Mismo isotipo que la barra superior: si el acceso lo pintara de otro
+              color, la marca cambiaria de tono al entrar. */}
+          <div
+            className="flex h-11 w-11 items-center justify-center rounded-xl bg-terracota-600 text-lg font-black text-white"
+            aria-hidden="true"
+          >
             C
           </div>
-          <span className="text-2xl font-bold tracking-tight text-slate-900">Colorsin</span>
+          <span className="text-2xl font-bold tracking-tight text-slate-900">
+            Colorsín Industrial
+          </span>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
-          <h1 className="text-xl font-bold text-slate-900">Iniciar sesion</h1>
+          <h1 className="text-xl font-bold text-slate-900">Iniciar sesión</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Entra con el correo con el que estas registrado.
+            Entra con el correo con el que estás registrado.
           </p>
 
           <form onSubmit={alEnviar} className="mt-6 flex flex-col gap-4" noValidate>
@@ -91,7 +99,7 @@ export function Login() {
 
             <div className="flex flex-col gap-1.5">
               <label htmlFor="password" className="text-sm font-semibold text-slate-700">
-                Contrasena
+                Contraseña
               </label>
               <input
                 id="password"
@@ -107,11 +115,7 @@ export function Login() {
 
             {error ? <Alerta tipo={esLimite ? 'permisos' : 'error'}>{error}</Alerta> : null}
 
-            <button
-              type="submit"
-              disabled={enviando}
-              className="mt-1 flex h-12 items-center justify-center gap-2.5 rounded-lg bg-colorsin-700 text-sm font-semibold text-white transition hover:bg-colorsin-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-            >
+            <Boton type="submit" disabled={enviando} className="mt-1">
               {enviando ? (
                 <>
                   <Spinner etiqueta="Entrando" />
@@ -123,12 +127,12 @@ export function Login() {
                   Entrar
                 </>
               )}
-            </button>
+            </Boton>
           </form>
         </div>
 
         <p className="mt-5 text-center text-xs leading-relaxed text-slate-500">
-          Tras cinco intentos fallidos en un minuto la API bloquea el acceso desde tu conexion
+          Tras cinco intentos fallidos en un minuto la API bloquea el acceso desde tu conexión
           durante un rato.
         </p>
       </div>

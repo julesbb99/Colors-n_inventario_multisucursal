@@ -6,7 +6,6 @@ import { esApiError, mensajeDeError } from '../../models/api';
 import type { ExistenciaDto } from '../../models/inventario';
 import { TablaExistencias } from '../../components/inventario/TablaExistencias';
 import { Alerta } from '../../components/ui/Alerta';
-import { CargandoPanel } from '../../components/ui/Spinner';
 
 type Pestana = 'todas' | 'alerta' | 'agotadas';
 
@@ -106,8 +105,11 @@ export function Existencias() {
               onClick={() => setPestana(id)}
               aria-current={activa ? 'page' : undefined}
               className={`-mb-px flex h-11 items-center gap-2 border-b-2 px-1 text-sm transition ${
+                // El subrayado activo es terracota, igual que el borde izquierdo
+                // del menu lateral: el acento marca donde estas, en todas las
+                // pantallas y con el mismo color.
                 activa
-                  ? 'border-colorsin-600 font-bold text-slate-900'
+                  ? 'border-terracota-500 font-bold text-slate-900'
                   : 'border-transparent font-medium text-slate-500 hover:text-slate-800'
               }`}
             >
@@ -125,9 +127,9 @@ export function Existencias() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <p className="min-w-0 flex-1 text-sm text-slate-500">
-          Mostrando {filtradas.length} de {existencias.length} registros · {nombreSedeActiva}
-        </p>
+        {/* Solo el alcance: el conteo lo lleva el pie de la tabla, y repetirlo
+            aquí obliga a comprobar si las dos cifras coinciden. */}
+        <p className="min-w-0 flex-1 text-sm text-slate-500">{nombreSedeActiva}</p>
 
         <div className="flex h-11 w-full items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 focus-within:border-colorsin-500 focus-within:ring-2 focus-within:ring-colorsin-200 sm:w-80">
           <Search size={17} className="shrink-0 text-slate-400" aria-hidden="true" />
@@ -145,12 +147,12 @@ export function Existencias() {
         </div>
       </div>
 
-      {cargando ? (
-        <CargandoPanel texto="Cargando existencias…" />
-      ) : error ? (
+      {/* La carga la pinta la propia tabla, para que los encabezados no
+          desaparezcan y la pantalla no salte de altura al llegar los datos. */}
+      {error ? (
         <Alerta tipo={esPermisos ? 'permisos' : 'error'}>{error}</Alerta>
       ) : (
-        <TablaExistencias existencias={filtradas} />
+        <TablaExistencias existencias={filtradas} cargando={cargando} />
       )}
     </div>
   );
