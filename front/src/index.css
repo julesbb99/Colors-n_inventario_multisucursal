@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    @apply bg-slate-100 text-slate-900;
+  }
+
+  /* El anillo de foco por defecto de Tailwind desaparece en varios controles
+     personalizados. Este lo devuelve de forma consistente: sin foco visible, la
+     aplicacion deja de poder usarse con el teclado. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-colorsin-500 ring-offset-1;
+  }
+}

@@ -69,8 +69,9 @@ public interface IInventarioService
     /// <summary>
     /// Lotes CON SALDO que caducan dentro del umbral.
     ///
-    /// EL RANGO es <c>hoy &lt;= fecha_vencimiento &lt;= hoy + diasUmbral</c>. Los
-    /// lotes que no caducan y los agotados quedan fuera.
+    /// EL RANGO llega hasta <c>hoy + diasUmbral</c> y por defecto NO tiene limite
+    /// inferior, asi que los que ya caducaron entran. Los lotes que no caducan y
+    /// los agotados quedan fuera.
     /// </summary>
     /// <param name="sucursalId">Sede, o nulo para toda la red.</param>
     /// <param name="diasUmbral">
@@ -80,20 +81,26 @@ public interface IInventarioService
     /// valor fuera de [1, 365] se acota al limite mas cercano.
     /// </param>
     /// <param name="incluirVencidos">
-    /// Quita el limite inferior del rango, de modo que tambien entren los lotes
-    /// que YA caducaron y todavia tienen saldo.
+    /// Si entran tambien los lotes que YA caducaron y todavia tienen saldo.
     ///
-    /// Falso por defecto, que es el rango pedido en la especificacion. Merece un
-    /// aviso: un lote vencido con existencias es MAS urgente que uno que vence en
-    /// tres semanas -no se puede despachar y hay que darlo de baja- y con el
-    /// valor por defecto no aparece en esta lista. El tablero si los incluye
-    /// siempre; ver <c>MetricasInventarioDto.LotesProximosAVencer</c>.
+    /// VERDADERO POR DEFECTO, o sea que el rango no tiene limite inferior. Un
+    /// lote vencido con existencias es MAS urgente que uno que vence en tres
+    /// semanas: no se puede despachar y lo que toca es darlo de baja. Dejarlo
+    /// fuera de la lista de alertas por tener la fecha "antes de la ventana"
+    /// esconderia justamente lo que ya se salio de control, y ademas haria que
+    /// esta consulta contradijera al tablero, que si los incluye siempre; ver
+    /// <c>MetricasInventarioDto.LotesProximosAVencer</c>.
+    ///
+    /// En falso, el rango queda en
+    /// <c>hoy &lt;= fecha_vencimiento &lt;= hoy + diasUmbral</c>: sirve para la
+    /// pregunta acotada de "que se me vence de aqui en adelante", separada de lo
+    /// que ya se perdio.
     /// </param>
     /// <param name="limite">Tope de filas, de 1 a 1000.</param>
     Task<IReadOnlyList<LoteDto>> ObtenerLotesProximosAVencerAsync(
         int? sucursalId = null,
         int? diasUmbral = null,
-        bool incluirVencidos = false,
+        bool incluirVencidos = true,
         int limite = 200,
         CancellationToken cancellationToken = default);
 

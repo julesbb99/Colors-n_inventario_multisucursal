@@ -162,18 +162,21 @@ public static class InventarioEndpoints
             TypedResults.Ok(await inventario.ObtenerLotesProximosAVencerAsync(
                 contexto.ResolverFiltroSucursal(sucursalId),
                 dias,
-                incluirVencidos ?? false,
+                incluirVencidos ?? true,
                 limite ?? 200,
                 cancellationToken)))
             .WithName("InventarioLotesProximosAVencer")
             .WithSummary("Alertas de caducidad")
             .WithDescription(
-                "Lotes CON SALDO cuyo vencimiento cae entre hoy y hoy + `dias`. `dias` omitido " +
-                "usa el umbral configurado en `AlertasInventario:DiasUmbralVencimiento`; " +
-                "fuera de [1, 365] se acota. " +
-                "`incluirVencidos=true` agrega los que YA caducaron y todavia tienen " +
-                "existencias, que son el caso mas urgente y por defecto NO salen aqui. " +
-                "El tablero si los incluye siempre.");
+                "Lotes CON SALDO que vencen el dia `hoy + dias` o antes. `dias` omitido usa el " +
+                "umbral configurado en `AlertasInventario:DiasUmbralVencimiento`; fuera de " +
+                "[1, 365] se acota. " +
+                "Los lotes YA VENCIDOS con existencias entran por defecto y salen de primeros, " +
+                "con `diasParaVencer` negativo y `vencido: true`: son el caso mas urgente, " +
+                "porque ya no se pueden despachar. " +
+                "`incluirVencidos=false` los deja fuera y acota el rango a hoy en adelante, " +
+                "para la pregunta separada de que esta por vencerse. " +
+                "Mismo criterio que el tablero.");
 
         grupo.MapGet("/lotes/{id:int}", async (
                 int id,

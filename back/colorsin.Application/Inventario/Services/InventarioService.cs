@@ -124,7 +124,7 @@ public sealed class InventarioService : IInventarioService
     public async Task<IReadOnlyList<LoteDto>> ObtenerLotesProximosAVencerAsync(
         int? sucursalId = null,
         int? diasUmbral = null,
-        bool incluirVencidos = false,
+        bool incluirVencidos = true,
         int limite = 200,
         CancellationToken cancellationToken = default)
     {
@@ -140,7 +140,8 @@ public sealed class InventarioService : IInventarioService
 
         var lotes = await _lotes.ObtenerProximosAVencerAsync(
             sucursalId,
-            // Sin limite inferior es como entran los que ya vencieron.
+            // Sin limite inferior entran los que ya vencieron, que es el caso
+            // por defecto: son los mas urgentes de la lista.
             incluirVencidos ? null : hoy,
             hoy.AddDays(dias),
             limite,

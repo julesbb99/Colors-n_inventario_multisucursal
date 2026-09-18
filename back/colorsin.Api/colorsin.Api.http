@@ -167,9 +167,8 @@ Accept: application/json
 
 
 ### Inventario - vencimientos con el umbral configurado
-### (AlertasInventario:DiasUmbralVencimiento, hoy 30 dias). A diferencia de
-### /api/inventario/lotes/proximos-a-vencer, el tablero SIEMPRE incluye los
-### lotes ya vencidos con saldo.
+### (AlertasInventario:DiasUmbralVencimiento, hoy 30 dias). Incluye los lotes ya
+### vencidos con saldo, igual que /api/inventario/lotes/proximos-a-vencer.
 GET {{host}}/api/dashboard/inventario
 Authorization: Bearer {{token}}
 Accept: application/json
@@ -273,10 +272,15 @@ Authorization: Bearer {{token}}
 ### El umbral por defecto sale de AlertasInventario:DiasUmbralVencimiento en
 ### appsettings.json, hoy 30 dias.
 ###
+### LOS LOTES YA VENCIDOS CON EXISTENCIAS ENTRAN POR DEFECTO, y salen de
+### primeros con diasParaVencer negativo y vencido: true. Son el caso mas
+### urgente: no se pueden despachar y hay que darlos de baja. Mismo criterio
+### que el tablero.
+###
 ### AVISO PARA PROBAR: de los once lotes sembrados, el primero en caducar es
 ### ESA-2024-118 (sede 1) el 2026-11-30 y los otros diez vencen entre 2028 y
-### 2029. Con 30 dias esta lista sale VACIA, y eso NO es un fallo. Usa ?dias
-### para ver algo.
+### 2029. Ninguno esta vencido, asi que con 30 dias esta lista sale VACIA y eso
+### NO es un fallo. Usa ?dias para ver algo.
 ### ---------------------------------------------------------------------------
 
 ### Con el umbral configurado
@@ -287,10 +291,10 @@ Authorization: Bearer {{token}}
 GET {{host}}/api/inventario/lotes/proximos-a-vencer?dias=365
 Authorization: Bearer {{token}}
 
-### Incluyendo los que YA vencieron y todavia tienen existencias.
-### Por defecto NO salen, porque el rango empieza en hoy. Son el caso mas
-### urgente de los dos: no se pueden despachar y hay que darlos de baja.
-GET {{host}}/api/inventario/lotes/proximos-a-vencer?dias=365&incluirVencidos=true
+### Solo lo que esta POR vencerse, dejando fuera lo ya perdido.
+### Acota el rango a hoy en adelante; es la pregunta separada de "que se me
+### vence de aqui en adelante".
+GET {{host}}/api/inventario/lotes/proximos-a-vencer?dias=365&incluirVencidos=false
 Authorization: Bearer {{token}}
 
 ### Abrir un lote nuevo. Solo AdminGeneral y GerenteSucursal (403 al Operador).
