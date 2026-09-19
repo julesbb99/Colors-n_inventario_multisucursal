@@ -83,7 +83,29 @@ public enum ErrorCompra
     /// La entrega no aporta nada: o no trae lineas con saldo pendiente, o todas
     /// las de la orden ya estaban completas.
     /// </summary>
-    NadaPorRecibir
+    NadaPorRecibir,
+
+    /// <summary>
+    /// Se intento editar o retirar una orden que ya salio de 'Pendiente'.
+    ///
+    /// Una orden deja de ser un borrador en cuanto se confirma o entra
+    /// mercancia: a partir de ahi hay un compromiso con el proveedor y, si hubo
+    /// recepcion, stock movido y asientos en el libro mayor. Cambiarla seria
+    /// reescribir el papel con el que se recibio.
+    /// </summary>
+    EstadoNoPermiteEdicion,
+
+    /// <summary>Falta el nombre o el telefono del proveedor.</summary>
+    DatosProveedorIncompletos,
+
+    /// <summary>Ya hay otro proveedor con ese nombre.</summary>
+    ProveedorDuplicado,
+
+    /// <summary>Se pidio retirar uno ya retirado, o reactivar uno ya activo.</summary>
+    ProveedorEstadoSinCambio,
+
+    /// <summary>El producto no esta asociado a ese proveedor en la lista de precios.</summary>
+    PrecioNoEncontrado
 }
 
 /// <summary>Desenlace de crear una orden de compra.</summary>

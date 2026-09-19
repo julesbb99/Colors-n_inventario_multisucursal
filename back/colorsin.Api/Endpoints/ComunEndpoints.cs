@@ -1,6 +1,9 @@
+using System.Security.Claims;
 using Colorsin.Api.Auth;
 using Colorsin.Application.Comun.Auth;
+using Colorsin.Application.Comun.DTOs;
 using Colorsin.Application.Comun.Services;
+using Colorsin.Domain.Comun;
 
 namespace Colorsin.Api.Endpoints;
 
@@ -11,10 +14,14 @@ namespace Colorsin.Api.Endpoints;
 /// linea de compra, venta o traslado: hay que elegir una unidad, y el `unidadId`
 /// no se puede adivinar desde el frontend.
 ///
-/// SOLO LECTURA. No hay forma de crear ni editar sedes, usuarios ni unidades
-/// desde la API: esas tres tablas se pueblan con los scripts de infra. Anadir
-/// escritura -sobre todo de usuarios- es una decision aparte, con su propia
-/// discusion sobre quien puede crear cuentas y con que rol.
+/// SEDES Y UNIDADES SON SOLO LECTURA: esas dos tablas se pueblan con los
+/// scripts de infra.
+///
+/// USUARIOS SI ADMITE ALTA, con una jerarquia estricta: el Administrador General
+/// da de alta gerentes y operadores en cualquier sede, y un gerente solo
+/// operadores de la suya. La regla completa vive en
+/// <see cref="ReglasCreacionUsuario"/>, que es codigo puro y se puede leer de un
+/// vistazo.
 /// </summary>
 public static class ComunEndpoints
 {
@@ -79,6 +86,91 @@ public static class ComunEndpoints
             // de quien coordina. Ademas expone correos y roles del personal.
             .RequireAuthorization(PoliticasAutorizacion.Supervision);
 
+        // ---------------------------------------------------------------------
+        // Alta de usuarios
+        //
+        // LA POLITICA DE SUPERVISION ES LA PUERTA, NO LA REGLA. Deja pasar al
+        // administrador y al gerente, que son los dos que pueden crear a
+        // alguien; pero lo que cada uno puede crear -y en que sede- lo decide
+        // ReglasCreacionUsuario dentro del servicio. Si estuviera aqui, un
+        // gerente podria dar de alta a otro gerente en otra sede, que es
+        // justamente lo que no debe poder hacer.
+        // ---------------------------------------------------------------------
+        grupo.MapPost("/usuarios", async (
+                CrearUsuarioDto peticion,
+                IUsuarioService usuarios,
+                IUsuarioContexto contexto,
+                ClaimsPrincipal quien,
+                CancellationToken cancellationToken) =>
+            {
+                var rol = RolDelDominio(quien.FindFirst(ClaimTypes.Role)?.Value);
+
+                if (rol is null)
+                {
+                    // Token sin rol reconocible: no es un caso de negocio, es un
+                    // token que no deberia existir.
+                    return RespuestasHttp.Fallo(
+                        StatusCodes.Status403Forbidden,
+                        "Sesion invalida",
+                        "Tu token no declara un rol reconocido. Vuelve a iniciar sesion.");
+                }
+
+                var creador = new CreadorUsuario(
+                    contexto.UsuarioIdRequerido(),
+                    rol.Value,
+                    contexto.SucursalId);
+
+                var resultado = await usuarios.CrearAsync(peticion, creador, cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Created($"/api/comun/usuarios/{resultado.Usuario!.Id}", resultado)
+                    : RespuestasHttp.Fallo(
+                        CodigoDe(resultado.Error), "Alta rechazada", resultado.Mensaje);
+            })
+            .WithName("ComunCrearUsuario")
+            .WithSummary("Da de alta un usuario. Jerarquia estricta por rol y sede.")
+            .WithDescription(
+                "El Administrador General crea gerentes y operadores en cualquier sede; un " +
+                "Gerente de Sucursal solo operadores de SU sede, y recibe 403 en cualquier otro " +
+                "caso. NADIE crea un Administrador General por esta via. " +
+                "`rol` viaja como numero: 1 = Gerente de Sucursal, 2 = Operador. " +
+                "La contrasena va en claro en el cuerpo -por eso este endpoint exige HTTPS fuera " +
+                "de desarrollo- y se guarda hasheada con BCrypt; nunca vuelve en la respuesta. " +
+                "Minimo 12 caracteres. " +
+                "OJO: el sistema todavia no tiene cambio de contrasena, asi que quien crea la " +
+                "cuenta conoce la clave inicial y su dueno no puede cambiarla desde la aplicacion.")
+            .Produces<ResultadoUsuario>(StatusCodes.Status201Created)
+            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+
         return rutas;
     }
+
+    /// <summary>
+    /// El rol del token, traducido al enum del dominio.
+    ///
+    /// Es el camino INVERSO de <see cref="RolesColorsin.ParaClaim"/>, y por eso
+    /// va pegado a el: el claim dice 'AdminGeneral' y el dominio dice
+    /// 'AdministradorGeneral'. Devuelve nulo ante cualquier cosa desconocida en
+    /// vez de adivinar; un rol mal traducido aqui decidiria permisos.
+    /// </summary>
+    private static RolUsuario? RolDelDominio(string? claim) => claim switch
+    {
+        RolesColorsin.AdminGeneral => RolUsuario.AdministradorGeneral,
+        RolesColorsin.GerenteSucursal => RolUsuario.GerenteDeSucursal,
+        RolesColorsin.Operador => RolUsuario.Operador,
+        _ => null
+    };
+
+    private static int CodigoDe(ErrorUsuario error) => error switch
+    {
+        // El rol o la sede no alcanzan. Es el mismo 403 del resto del sistema.
+        ErrorUsuario.NoAutorizado => StatusCodes.Status403Forbidden,
+
+        ErrorUsuario.SucursalNoEncontrada => StatusCodes.Status404NotFound,
+
+        // Existe, pero el estado actual de los datos no admite la operacion.
+        ErrorUsuario.EmailDuplicado => StatusCodes.Status409Conflict,
+
+        _ => StatusCodes.Status400BadRequest
+    };
 }

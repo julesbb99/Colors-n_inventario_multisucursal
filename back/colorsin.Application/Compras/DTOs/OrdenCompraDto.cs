@@ -18,6 +18,11 @@ namespace Colorsin.Application.Compras.DTOs;
 /// para no traer toda la historia de compras en cada consulta.
 /// </param>
 /// <param name="Total">Suma de los subtotales netos de las lineas.</param>
+/// <param name="LineasTotales">
+/// Cuantas lineas tiene la orden. Viaja aparte porque <paramref name="Detalles"/>
+/// llega VACIA en los listados: contar ahi daria cero, y "3 de 0" es lo que se
+/// veia en la tabla antes de anadir este campo.
+/// </param>
 /// <param name="LineasPendientes">
 /// Cuantas lineas siguen sin completarse. Cero en una orden totalmente
 /// recibida. Vale cero tambien cuando el detalle no se cargo, asi que solo
@@ -36,4 +41,5 @@ public sealed record OrdenCompraDto(
     int? PlazoPagoDias,
     IReadOnlyList<DetalleOrdenCompraDto> Detalles,
     decimal Total,
-    int LineasPendientes);
+    int LineasPendientes,
+    int LineasTotales);

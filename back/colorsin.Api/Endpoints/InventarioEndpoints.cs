@@ -56,18 +56,40 @@ public static class InventarioEndpoints
         // ---------------------------------------------------------------------
         // Consultas
         // ---------------------------------------------------------------------
+        // ---------------------------------------------------------------------
+        // EXISTENCIAS: LA UNICA CONSULTA DEL SISTEMA SIN AISLAMIENTO POR SEDE.
+        //
+        // No pasa por ResolverFiltroSucursal, y es deliberado: un gerente o un
+        // operador ven las existencias de CUALQUIER sede. Lo pidio el negocio, y
+        // tiene sentido operativo -antes de pedir un traslado hay que poder mirar
+        // quien tiene saldo- pero conviene tener claro que se esta aceptando:
+        //
+        //   Se expone entre sedes el saldo, el minimo y el COSTO PROMEDIO, que es
+        //   dato comercial. Si algun dia el costo no debe cruzar de sede, lo que
+        //   hay que hacer es vaciarlo en el DTO cuando la fila no sea de la sede
+        //   de quien pregunta, NO volver a filtrar la consulta entera.
+        //
+        // ESTO NO AFECTA A NADIE MAS. El resto de consultas del sistema -lotes,
+        // movimientos, ventas, compras, traslados, tablero- siguen pasando por
+        // ResolverFiltroSucursal y siguen devolviendo 403 ante una sede ajena.
+        // Y ESCRIBIR sigue acotado a la sede propia: ver no es tocar.
+        // ---------------------------------------------------------------------
         grupo.MapGet("/existencias", async (
                 IInventarioService inventario,
-                IUsuarioContexto contexto,
                 int? sucursalId,
+                bool? incluirInactivas,
                 CancellationToken cancellationToken) =>
             TypedResults.Ok(await inventario.ObtenerExistenciasAsync(
-                contexto.ResolverFiltroSucursal(sucursalId), cancellationToken)))
+                sucursalId, incluirInactivas ?? false, cancellationToken)))
             .WithName("InventarioExistencias")
-            .WithSummary("Saldos por sede y producto")
+            .WithSummary("Saldos por sede y producto. Visible desde cualquier sede.")
             .WithDescription(
-                "Un gerente u operador ve solo su sede, omita o no el parametro. El administrador " +
-                "ve la red entera si no lo manda.");
+                "Sin `sucursalId` devuelve la red entera, para cualquier rol: esta consulta NO " +
+                "aisla por sede, a diferencia del resto del sistema, porque ver donde hay saldo " +
+                "es lo que permite pedir un traslado con criterio. " +
+                "Poder verlas no da derecho a tocarlas: crear, editar y deshabilitar siguen " +
+                "exigiendo que la sede sea la propia. " +
+                "`incluirInactivas=true` anade las dadas de baja, que por defecto no salen.");
 
         grupo.MapGet("/alertas", async (
                 IInventarioService inventario,
@@ -333,8 +355,182 @@ public static class InventarioEndpoints
             .Produces<ResultadoLote>()
             .RequireAuthorization(PoliticasAutorizacion.Supervision);
 
+        // ---------------------------------------------------------------------
+        // Altas, bajas y edicion de existencias
+        //
+        // SUPERVISION LAS CUATRO, y ademas sobre la sede propia. Son las dos
+        // comprobaciones del sistema y ninguna sustituye a la otra: la politica
+        // dice QUE clase de operacion puedes hacer, ExigirAccesoASucursal dice
+        // SOBRE QUE sede. Un gerente de Manizales pasa la politica y aun asi no
+        // deshabilita un producto del Eje Cafetero.
+        //
+        // Queda fuera el Operador. Habilitar o retirar un producto de una sede es
+        // una decision de surtido, de quien responde por el resultado de la sede,
+        // no de quien ejecuta el dia a dia. Mismo criterio que el movimiento
+        // manual y que el alta de lotes.
+        //
+        // NO HAY DELETE DE VERDAD. `DELETE /existencias/{id}` hace baja logica:
+        // ver la migracion 12 y ErrorExistencia.TieneSaldo. Se mantiene el verbo
+        // DELETE porque es lo que expresa la intencion de quien llama -retirar el
+        // producto de esa sede- y el efecto observable es ese; lo que no ocurre
+        // es la perdida de la historia.
+        // ---------------------------------------------------------------------
+        grupo.MapPost("/existencias", async (
+                CrearExistenciaDto peticion,
+                IInventarioService inventario,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                contexto.ExigirAccesoASucursal(peticion.SucursalId);
+
+                var resultado = await inventario.CrearExistenciaAsync(
+                    peticion, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Created(
+                        $"/api/inventario/existencias/{resultado.Existencia!.Id}", resultado)
+                    : RespuestasHttp.Fallo(
+                        CodigoDeExistencia(resultado.Error), "Existencia rechazada", resultado.Mensaje);
+            })
+            .WithName("InventarioCrearExistencia")
+            .WithSummary("Habilita un producto en una sede. Solo supervision, y solo en tu sede.")
+            .WithDescription(
+                "NO recibe cantidad, por el mismo motivo que el alta de lotes: el saldo solo se " +
+                "mueve por el libro mayor, donde cada asiento dice de donde salio la mercancia. " +
+                "La existencia nace en CERO y se llena con POST /api/inventario/movimientos, con " +
+                "una recepcion de compra o con un traslado. " +
+                "Si la pareja (sede, producto) ya existe pero esta deshabilitada, la REACTIVA con " +
+                "el saldo que tenia en vez de fallar: el indice unico no deja crear otra fila, " +
+                "asi que negarse dejaria a la persona sin salida.")
+            .Produces<ResultadoExistencia>(StatusCodes.Status201Created)
+            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+
+        grupo.MapPut("/existencias/{id:int}", async (
+                int id,
+                ActualizarExistenciaDto peticion,
+                IInventarioService inventario,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                var actual = await inventario.ObtenerExistenciaPorIdAsync(id, cancellationToken);
+                if (actual is null)
+                {
+                    return RespuestasHttp.Fallo(
+                        StatusCodes.Status404NotFound,
+                        "Existencia no encontrada",
+                        $"No existe la existencia {id}.");
+                }
+
+                contexto.ExigirAccesoASucursal(actual.SucursalId);
+
+                var resultado = await inventario.ActualizarExistenciaAsync(
+                    id, peticion, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Ok(resultado)
+                    : RespuestasHttp.Fallo(
+                        CodigoDeExistencia(resultado.Error), "Existencia rechazada", resultado.Mensaje);
+            })
+            .WithName("InventarioActualizarExistencia")
+            .WithSummary("Cambia el minimo de reposicion. Solo supervision, y solo en tu sede.")
+            .WithDescription(
+                "Solo el minimo. La cantidad la mueve el libro mayor y el costo promedio lo " +
+                "recalcula cada entrada de mercancia; ninguno de los dos se digita. " +
+                "El valor anterior y el nuevo quedan en auditoria_eventos.")
+            .Produces<ResultadoExistencia>()
+            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+
+        grupo.MapDelete("/existencias/{id:int}", async (
+                int id,
+                IInventarioService inventario,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                var actual = await inventario.ObtenerExistenciaPorIdAsync(id, cancellationToken);
+                if (actual is null)
+                {
+                    return RespuestasHttp.Fallo(
+                        StatusCodes.Status404NotFound,
+                        "Existencia no encontrada",
+                        $"No existe la existencia {id}.");
+                }
+
+                contexto.ExigirAccesoASucursal(actual.SucursalId);
+
+                var resultado = await inventario.DesactivarExistenciaAsync(
+                    id, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Ok(resultado)
+                    : RespuestasHttp.Fallo(
+                        CodigoDeExistencia(resultado.Error), "Existencia rechazada", resultado.Mensaje);
+            })
+            .WithName("InventarioDesactivarExistencia")
+            .WithSummary("BAJA LOGICA: deshabilita el producto en esa sede. No borra nada.")
+            .WithDescription(
+                "La fila se queda en la base con su saldo, sus lotes y todo el libro mayor que la " +
+                "referencia; lo unico que cambia es que deja de listarse y de alertar. " +
+                "SE NIEGA CON 409 SI TODAVIA TIENE SALDO: esconder una fila con mercancia dentro " +
+                "haria que la suma de las existencias dejara de cuadrar con la bodega sin que " +
+                "ningun asiento lo explique. Saca primero el saldo con un traslado, una venta o un " +
+                "ajuste. " +
+                "Se deshace con POST /api/inventario/existencias/{id}/reactivar.")
+            .Produces<ResultadoExistencia>()
+            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+
+        grupo.MapPost("/existencias/{id:int}/reactivar", async (
+                int id,
+                IInventarioService inventario,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                var actual = await inventario.ObtenerExistenciaPorIdAsync(id, cancellationToken);
+                if (actual is null)
+                {
+                    return RespuestasHttp.Fallo(
+                        StatusCodes.Status404NotFound,
+                        "Existencia no encontrada",
+                        $"No existe la existencia {id}.");
+                }
+
+                contexto.ExigirAccesoASucursal(actual.SucursalId);
+
+                var resultado = await inventario.ReactivarExistenciaAsync(
+                    id, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Ok(resultado)
+                    : RespuestasHttp.Fallo(
+                        CodigoDeExistencia(resultado.Error), "Existencia rechazada", resultado.Mensaje);
+            })
+            .WithName("InventarioReactivarExistencia")
+            .WithSummary("Deshace la baja logica. Solo supervision, y solo en tu sede.")
+            .WithDescription(
+                "Vuelve a listar el producto en esa sede, con el saldo que tuviera. " +
+                "Es lo que hace que la baja no sea un camino sin retorno desde la interfaz.")
+            .Produces<ResultadoExistencia>()
+            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+
         return rutas;
     }
+
+    private static int CodigoDeExistencia(ErrorExistencia error) => error switch
+    {
+        ErrorExistencia.ProductoNoEncontrado
+            or ErrorExistencia.SucursalNoEncontrada
+            or ErrorExistencia.ExistenciaNoEncontrada
+            => StatusCodes.Status404NotFound,
+
+        // 409 los dos: la peticion esta bien formada y quien la manda tiene
+        // permiso; lo que no admite la operacion es el estado actual de los
+        // datos. Un 400 diria que el cuerpo esta mal, que no es el caso.
+        ErrorExistencia.ExistenciaDuplicada
+            or ErrorExistencia.TieneSaldo
+            or ErrorExistencia.EstadoSinCambio
+            => StatusCodes.Status409Conflict,
+
+        _ => StatusCodes.Status400BadRequest
+    };
 
     private static int CodigoDe(ErrorLote error) => error switch
     {

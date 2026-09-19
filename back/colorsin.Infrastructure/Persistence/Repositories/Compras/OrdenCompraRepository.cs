@@ -25,13 +25,22 @@ public sealed class OrdenCompraRepository : IOrdenCompraRepository
         int limite = 100,
         CancellationToken cancellationToken = default)
     {
-        // Sin Include del detalle: este metodo alimenta listados, y cargar las
-        // lineas de cien ordenes convertiria una consulta en ciento una.
+        // CON el detalle, aunque el listado no devuelva las lineas: hacen falta
+        // para calcular el total y cuantas lineas siguen esperando mercancia,
+        // que son dos columnas de ese listado. Sin este Include el total salia
+        // en cero para todas las ordenes.
+        //
+        // No son "ciento una consultas": EF Core resuelve un Include de
+        // coleccion en UNA sola consulta con JOIN. Lo que si hace es repetir el
+        // encabezado por cada linea, y por eso NO se incluyen aqui Producto ni
+        // Unidad de cada linea: el listado no los necesita -solo suma importes-
+        // y multiplicarian el ancho de las filas sin aportar nada.
         var consulta = _db.OrdenesCompra
             .AsNoTracking()
             .Include(o => o.Proveedor)
             .Include(o => o.Sucursal)
             .Include(o => o.Usuario)
+            .Include(o => o.Detalles)
             .AsQueryable();
 
         if (sucursalId is int sid)
@@ -126,6 +135,41 @@ public sealed class OrdenCompraRepository : IOrdenCompraRepository
 
     public void ActualizarCantidadRecibida(OrdenCompraDetalle detalle, decimal cantidadRecibida) =>
         detalle.CantidadRecibida = cantidadRecibida;
+
+    public Task<OrdenCompra?> ObtenerParaEditarAsync(
+        int id,
+        CancellationToken cancellationToken = default) =>
+        _db.OrdenesCompra
+            // Con seguimiento: esta orden se modifica y se guarda.
+            .Include(o => o.Detalles)
+            .FirstOrDefaultAsync(o => o.Id == id, cancellationToken);
+
+    public void QuitarDetalles(IEnumerable<OrdenCompraDetalle> detalles) =>
+        _db.OrdenCompraDetalles.RemoveRange(detalles);
+
+    public void AgregarDetalle(OrdenCompraDetalle detalle) =>
+        _db.OrdenCompraDetalles.Add(detalle);
+
+    public Task<OrdenCompraDetalle?> ObtenerUltimaLineaConPrecioAsync(
+        int productoId,
+        int proveedorId,
+        CancellationToken cancellationToken = default) =>
+        _db.OrdenCompraDetalles
+            .AsNoTracking()
+            .Include(d => d.Unidad)
+            .Include(d => d.OrdenCompra)
+            .Where(d =>
+                d.ProductoId == productoId &&
+                d.OrdenCompra.ProveedorId == proveedorId &&
+                d.PrecioUnitario != null &&
+                d.OrdenCompra.Estado != EstadoOrdenCompra.Cancelada)
+            // Por fecha de la orden y, a igualdad, por id: dos ordenes del mismo
+            // dia tienen la misma `fecha` si se crearon en el mismo segundo, y
+            // sin el desempate el "ultimo precio" seria el que MySQL devolviera
+            // primero, que no esta definido.
+            .OrderByDescending(d => d.OrdenCompra.Fecha)
+            .ThenByDescending(d => d.OrdenCompraId)
+            .FirstOrDefaultAsync(cancellationToken);
 
     public Task<int> GuardarCambiosAsync(CancellationToken cancellationToken = default) =>
         _db.SaveChangesAsync(cancellationToken);

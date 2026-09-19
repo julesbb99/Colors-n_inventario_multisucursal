@@ -22,6 +22,16 @@ public class InventarioSucursal
     /// <summary>Costo promedio ponderado por unidad base.</summary>
     public decimal CostoPromedio { get; set; }
 
+    /// <summary>
+    /// Baja logica. <c>false</c> saca la existencia del listado y de las alertas,
+    /// pero conserva el saldo, los lotes y todo el libro mayor que la referencia.
+    ///
+    /// NO ES "sin stock": un saldo en cero sigue activo -el producto se maneja en
+    /// esa sede, simplemente se agoto- mientras que uno inactivo dice que esa
+    /// sede dejo de manejar el producto.
+    /// </summary>
+    public bool Activo { get; set; } = true;
+
     // --- Navegacion ---
     public Sucursal Sucursal { get; set; } = null!;
     public Producto Producto { get; set; } = null!;

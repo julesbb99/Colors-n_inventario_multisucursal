@@ -23,7 +23,9 @@ const ENCABEZADOS: Record<string, Encabezado> = {
   },
   '/inventario/existencias': {
     titulo: 'Existencias',
-    subtitulo: 'Saldo por sede y producto, en unidad base',
+    // Ya no dice "en unidad base": la tabla permite mirar el mismo saldo en
+    // litros, galones o canecas, y el subtitulo contradecia lo que se veia.
+    subtitulo: 'Saldo por sede y producto, en la unidad que elijas',
   },
   '/inventario/lotes': {
     titulo: 'Lotes FEFO',
@@ -40,6 +42,10 @@ const ENCABEZADOS: Record<string, Encabezado> = {
   '/ventas': {
     titulo: 'Ventas',
     subtitulo: 'Salidas de mostrador, descontadas por FEFO',
+  },
+  '/usuarios': {
+    titulo: 'Usuarios',
+    subtitulo: 'Quién da de alta a quién: el administrador a gerentes y operadores, el gerente a operadores de su sede',
   },
 };
 

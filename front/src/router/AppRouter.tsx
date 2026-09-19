@@ -8,6 +8,8 @@ import { LotesFefo } from '../pages/inventario/LotesFefo';
 import { Traslados } from '../pages/transferencias/Traslados';
 import { Compras } from '../pages/compras/Compras';
 import { Ventas } from '../pages/ventas/Ventas';
+import { Usuarios } from '../pages/comun/Usuarios';
+import { ROLES_SUPERVISION } from '../models/auth';
 
 /**
  * Rutas de la aplicación.
@@ -37,6 +39,16 @@ export function AppRouter() {
             <Route path="/traslados" element={<Traslados />} />
             <Route path="/compras" element={<Compras />} />
             <Route path="/ventas" element={<Ventas />} />
+          </Route>
+        </Route>
+
+        {/* Usuarios SÍ lleva `allowedRoles`: es la primera pantalla del sistema
+            que un operador no debe siquiera abrir, porque lista correos y roles
+            del personal. La API responde 403 igualmente; esto evita mostrarle
+            una pantalla que solo le daría un error. */}
+        <Route element={<ProtectedRoute allowedRoles={ROLES_SUPERVISION} />}>
+          <Route element={<MainLayout />}>
+            <Route path="/usuarios" element={<Usuarios />} />
           </Route>
         </Route>
 

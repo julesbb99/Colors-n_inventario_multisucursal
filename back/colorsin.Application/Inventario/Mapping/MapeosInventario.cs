@@ -25,7 +25,9 @@ public static class MapeosInventario
         saldo.CantidadBase,
         saldo.StockMinimo,
         saldo.CostoPromedio,
-        saldo.CantidadBase <= saldo.StockMinimo);
+        // Una existencia deshabilitada no alerta nunca, este como este su saldo.
+        saldo.Activo && saldo.CantidadBase <= saldo.StockMinimo,
+        saldo.Activo);
 
     public static StockAlertaDto ToAlertaDto(this InventarioSucursal saldo) => new(
         saldo.ProductoId,

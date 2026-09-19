@@ -1,7 +1,9 @@
 import axiosInstance from '../interceptors/axiosInstance';
 import { paramsDeSede } from './comun';
 import type {
+  ActualizarExistenciaDto,
   ActualizarLoteDto,
+  CrearExistenciaDto,
   CrearLoteDto,
   ExistenciaDto,
   LoteDto,
@@ -9,12 +11,55 @@ import type {
   RegistrarMovimientoDto,
 } from '../models/inventario';
 
+/**
+ * GET /api/inventario/existencias
+ *
+ * LA ÚNICA CONSULTA DEL SISTEMA QUE NO AÍSLA POR SEDE: un gerente o un operador
+ * pueden pedir cualquier sede, o la red entera con `sucursalId` nulo. El resto
+ * de módulos sigue devolviendo 403 ante una sede ajena.
+ *
+ * Verlas no da derecho a tocarlas: crear, editar y deshabilitar siguen exigiendo
+ * que la sede sea la propia.
+ */
 export async function obtenerExistencias(
   sucursalId: number | null,
+  incluirInactivas = false,
 ): Promise<ExistenciaDto[]> {
   const { data } = await axiosInstance.get<ExistenciaDto[]>('/inventario/existencias', {
-    params: paramsDeSede(sucursalId),
+    params: {
+      ...paramsDeSede(sucursalId),
+      // Solo se manda cuando es true: un `incluirInactivas=false` explícito en
+      // la URL es ruido, porque es justo lo que hace la API por defecto.
+      ...(incluirInactivas ? { incluirInactivas: true } : {}),
+    },
   });
+  return data;
+}
+
+export async function crearExistencia(peticion: CrearExistenciaDto) {
+  const { data } = await axiosInstance.post('/inventario/existencias', peticion);
+  return data;
+}
+
+export async function actualizarExistencia(id: number, peticion: ActualizarExistenciaDto) {
+  const { data } = await axiosInstance.put(`/inventario/existencias/${id}`, peticion);
+  return data;
+}
+
+/**
+ * BAJA LÓGICA. El verbo es DELETE porque expresa la intención -retirar el
+ * producto de esa sede- pero el servidor solo marca la fila como inactiva: no
+ * se borra nada, y se puede deshacer con `reactivarExistencia`.
+ *
+ * La API responde 409 si la existencia todavía tiene saldo.
+ */
+export async function desactivarExistencia(id: number) {
+  const { data } = await axiosInstance.delete(`/inventario/existencias/${id}`);
+  return data;
+}
+
+export async function reactivarExistencia(id: number) {
+  const { data } = await axiosInstance.post(`/inventario/existencias/${id}/reactivar`);
   return data;
 }
 

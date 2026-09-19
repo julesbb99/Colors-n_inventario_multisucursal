@@ -48,5 +48,15 @@ public interface IUsuarioRepository
     /// Confirma lo que haya preparado: el hash actualizado, el evento de
     /// auditoria del inicio de sesion, o los dos en la misma transaccion.
     /// </summary>
+    /// <summary>
+    /// Crea un usuario. NO guarda: deja el cambio preparado.
+    ///
+    /// Quien confirma es el servicio, para que el evento de auditoria del alta
+    /// entre en el mismo guardado que el usuario. Si se confirmaran por separado
+    /// podria quedar una cuenta creada sin rastro de quien la creo, que es justo
+    /// lo que la bitacora existe para impedir.
+    /// </summary>
+    void Agregar(Usuario usuario);
+
     Task<int> GuardarCambiosAsync(CancellationToken cancellationToken = default);
 }

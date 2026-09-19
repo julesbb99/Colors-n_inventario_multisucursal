@@ -42,8 +42,10 @@ interface CampoTextoProps {
   ayuda?: string;
   requerido?: boolean;
   placeholder?: string;
-  tipo?: 'text' | 'date';
+  tipo?: 'text' | 'date' | 'password';
   disabled?: boolean;
+  /** `new-password` evita que el navegador ofrezca las credenciales de quien está conectado. */
+  autoComplete?: string;
 }
 
 export function CampoTexto({
@@ -55,6 +57,7 @@ export function CampoTexto({
   placeholder,
   tipo = 'text',
   disabled,
+  autoComplete,
 }: CampoTextoProps) {
   return (
     <Envoltorio etiqueta={etiqueta} ayuda={ayuda} requerido={requerido}>
@@ -65,6 +68,7 @@ export function CampoTexto({
           value={valor}
           disabled={disabled}
           placeholder={placeholder}
+          autoComplete={autoComplete}
           onChange={(evento) => onCambio(evento.target.value)}
           className={BASE_CONTROL}
         />

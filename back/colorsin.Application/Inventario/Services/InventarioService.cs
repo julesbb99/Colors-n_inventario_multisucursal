@@ -60,11 +60,320 @@ public sealed class InventarioService : IInventarioService
 
     public async Task<IReadOnlyList<InventarioSucursalDto>> ObtenerExistenciasAsync(
         int? sucursalId = null,
+        bool incluirInactivas = false,
         CancellationToken cancellationToken = default)
     {
-        var saldos = await _inventario.ObtenerExistenciasAsync(sucursalId, cancellationToken);
+        var saldos = await _inventario.ObtenerExistenciasAsync(
+            sucursalId, incluirInactivas, cancellationToken);
+
         return saldos.Select(s => s.ToDto()).ToList();
     }
+
+    public async Task<InventarioSucursalDto?> ObtenerExistenciaPorIdAsync(
+        int id,
+        CancellationToken cancellationToken = default)
+    {
+        var saldo = await _inventario.ObtenerExistenciaPorIdAsync(id, cancellationToken);
+        return saldo?.ToDto();
+    }
+
+    // =========================================================================
+    // ALTAS, BAJAS Y EDICION DE EXISTENCIAS
+    // =========================================================================
+
+    public async Task<ResultadoExistencia> CrearExistenciaAsync(
+        CrearExistenciaDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        if (peticion.StockMinimo < 0m)
+        {
+            return ResultadoExistencia.Fallo(
+                ErrorExistencia.StockMinimoInvalido,
+                "El minimo de reposicion no puede ser negativo.");
+        }
+
+        // Producto y sede antes de tocar nada: la base los rechazaria igual por
+        // clave foranea, pero un 404 con el id que fallo se lee y un error de
+        // restriccion de MySQL, no. Mismo criterio que en CrearLoteAsync.
+        var producto = await _productos.ObtenerPorIdAsync(peticion.ProductoId, cancellationToken);
+        if (producto is null)
+        {
+            return ResultadoExistencia.Fallo(
+                ErrorExistencia.ProductoNoEncontrado,
+                $"No existe el producto {peticion.ProductoId}.");
+        }
+
+        var sucursal = await _sucursales.ObtenerPorIdAsync(peticion.SucursalId, cancellationToken);
+        if (sucursal is null)
+        {
+            return ResultadoExistencia.Fallo(
+                ErrorExistencia.SucursalNoEncontrada,
+                $"No existe la sede {peticion.SucursalId}.");
+        }
+
+        var existente = await _inventario.ObtenerSaldoAsync(
+            peticion.SucursalId, peticion.ProductoId, cancellationToken);
+
+        if (existente is not null && existente.Activo)
+        {
+            return ResultadoExistencia.Fallo(
+                ErrorExistencia.ExistenciaDuplicada,
+                $"La sede '{sucursal.Nombre}' ya maneja '{producto.Nombre}'. " +
+                "Si lo que quieres es cambiar el minimo de reposicion, editalo en la fila " +
+                "que ya esta en el listado.");
+        }
+
+        return await _inventario.EjecutarEnTransaccionAsync(
+            ct => existente is null
+                // Fila nueva.
+                ? AltaEnTransaccionAsync(peticion, producto.Nombre, sucursal.Nombre, usuarioId, ct)
+                // Habia una dada de baja: se reactiva. El indice unico
+                // (sucursal, producto) no deja crear otra, asi que sin esta rama
+                // la persona se quedaria sin ninguna via desde la interfaz.
+                : ReactivarPorAltaAsync(existente.Id, peticion.StockMinimo, usuarioId, ct),
+            cancellationToken);
+    }
+
+    private async Task<ResultadoExistencia> AltaEnTransaccionAsync(
+        CrearExistenciaDto peticion,
+        string nombreProducto,
+        string nombreSucursal,
+        int usuarioId,
+        CancellationToken cancellationToken)
+    {
+        var saldo = new InventarioSucursal
+        {
+            SucursalId = peticion.SucursalId,
+            ProductoId = peticion.ProductoId,
+            // En cero, no nulo: se sabe que no hay nada. La mercancia entra
+            // despues por un ingreso, una compra o un traslado, que son las vias
+            // que dejan asiento en el libro mayor.
+            CantidadBase = 0m,
+            StockMinimo = peticion.StockMinimo,
+            // Sin compras todavia no hay costo que promediar. Lo fija la primera
+            // entrada de mercancia.
+            CostoPromedio = 0m,
+            Activo = true
+        };
+
+        _inventario.AgregarSaldo(saldo);
+
+        // Se guarda aqui para que MySQL asigne el id, que hace falta abajo.
+        // Sigue dentro de la transaccion.
+        await _inventario.GuardarCambiosAsync(cancellationToken);
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo,
+            "CrearExistencia",
+            usuarioId,
+            $"existencia={saldo.Id} | " +
+            $"producto={peticion.ProductoId} ('{nombreProducto}') | " +
+            $"sucursal={peticion.SucursalId} ('{nombreSucursal}') | " +
+            $"stockMinimo={Numero(peticion.StockMinimo)} | cantidadBase=0",
+            cancellationToken);
+
+        await _inventario.GuardarCambiosAsync(cancellationToken);
+
+        return await ResultadoTrasGuardar(
+            saldo.Id,
+            $"'{nombreProducto}' queda habilitado en '{nombreSucursal}', con saldo cero. " +
+            "La mercancia entra con un ingreso, una recepcion de compra o un traslado.",
+            cancellationToken);
+    }
+
+    private async Task<ResultadoExistencia> ReactivarPorAltaAsync(
+        int id,
+        decimal stockMinimo,
+        int usuarioId,
+        CancellationToken cancellationToken)
+    {
+        var saldo = await _inventario.ObtenerExistenciaPorIdAsync(id, cancellationToken);
+        if (saldo is null)
+        {
+            return ResultadoExistencia.Fallo(
+                ErrorExistencia.ExistenciaNoEncontrada,
+                $"No existe la existencia {id}.");
+        }
+
+        saldo.Activo = true;
+        saldo.StockMinimo = stockMinimo;
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo,
+            "ReactivarExistencia",
+            usuarioId,
+            $"existencia={saldo.Id} | via=alta | " +
+            $"stockMinimo={Numero(stockMinimo)} | " +
+            $"cantidadBase={Numero(saldo.CantidadBase)}",
+            cancellationToken);
+
+        await _inventario.GuardarCambiosAsync(cancellationToken);
+
+        return await ResultadoTrasGuardar(
+            saldo.Id,
+            $"'{saldo.Producto?.Nombre}' ya existia en '{saldo.Sucursal?.Nombre}' pero estaba " +
+            "deshabilitado, asi que se reactivo con el saldo que tenia.",
+            cancellationToken);
+    }
+
+    public async Task<ResultadoExistencia> ActualizarExistenciaAsync(
+        int id,
+        ActualizarExistenciaDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        if (peticion.StockMinimo < 0m)
+        {
+            return ResultadoExistencia.Fallo(
+                ErrorExistencia.StockMinimoInvalido,
+                "El minimo de reposicion no puede ser negativo.");
+        }
+
+        var saldo = await _inventario.ObtenerExistenciaPorIdAsync(id, cancellationToken);
+        if (saldo is null)
+        {
+            return ResultadoExistencia.Fallo(
+                ErrorExistencia.ExistenciaNoEncontrada,
+                $"No existe la existencia {id}.");
+        }
+
+        var anterior = saldo.StockMinimo;
+        saldo.StockMinimo = peticion.StockMinimo;
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo,
+            "ActualizarExistencia",
+            usuarioId,
+            $"existencia={saldo.Id} | " +
+            $"stockMinimo={Numero(anterior)} -> {Numero(peticion.StockMinimo)}",
+            cancellationToken);
+
+        await _inventario.GuardarCambiosAsync(cancellationToken);
+
+        return await ResultadoTrasGuardar(
+            saldo.Id, "Minimo de reposicion actualizado.", cancellationToken);
+    }
+
+    public async Task<ResultadoExistencia> DesactivarExistenciaAsync(
+        int id,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        var saldo = await _inventario.ObtenerExistenciaPorIdAsync(id, cancellationToken);
+        if (saldo is null)
+        {
+            return ResultadoExistencia.Fallo(
+                ErrorExistencia.ExistenciaNoEncontrada,
+                $"No existe la existencia {id}.");
+        }
+
+        if (!saldo.Activo)
+        {
+            return ResultadoExistencia.Fallo(
+                ErrorExistencia.EstadoSinCambio,
+                "Esa existencia ya estaba deshabilitada.");
+        }
+
+        // LA REGLA QUE PROTEGE EL CUADRE. Esconder una fila con mercancia dentro
+        // haria que la suma de las existencias activas dejara de coincidir con lo
+        // que hay en la bodega, y ningun asiento del libro mayor explicaria la
+        // diferencia. Primero se saca el saldo por donde corresponde.
+        if (saldo.CantidadBase != 0m)
+        {
+            var simbolo = saldo.Producto?.UnidadBase?.Simbolo ?? string.Empty;
+
+            return ResultadoExistencia.Fallo(
+                ErrorExistencia.TieneSaldo,
+                $"'{saldo.Producto?.Nombre}' todavia tiene {Numero(saldo.CantidadBase)} {simbolo} " +
+                $"en '{saldo.Sucursal?.Nombre}'. Saca primero esa mercancia -con un traslado, una " +
+                "venta o un ajuste de salida- y entonces si se puede deshabilitar. Asi el " +
+                "movimiento queda explicado en el libro mayor en vez de desaparecer del listado.");
+        }
+
+        saldo.Activo = false;
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo,
+            "DesactivarExistencia",
+            usuarioId,
+            $"existencia={saldo.Id} | " +
+            $"producto={saldo.ProductoId} ('{saldo.Producto?.Nombre}') | " +
+            $"sucursal={saldo.SucursalId} ('{saldo.Sucursal?.Nombre}') | cantidadBase=0",
+            cancellationToken);
+
+        await _inventario.GuardarCambiosAsync(cancellationToken);
+
+        return await ResultadoTrasGuardar(
+            saldo.Id,
+            $"'{saldo.Producto?.Nombre}' queda deshabilitado en '{saldo.Sucursal?.Nombre}'. " +
+            "No se borro nada: su historial sigue completo y se puede volver a habilitar.",
+            cancellationToken);
+    }
+
+    public async Task<ResultadoExistencia> ReactivarExistenciaAsync(
+        int id,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        var saldo = await _inventario.ObtenerExistenciaPorIdAsync(id, cancellationToken);
+        if (saldo is null)
+        {
+            return ResultadoExistencia.Fallo(
+                ErrorExistencia.ExistenciaNoEncontrada,
+                $"No existe la existencia {id}.");
+        }
+
+        if (saldo.Activo)
+        {
+            return ResultadoExistencia.Fallo(
+                ErrorExistencia.EstadoSinCambio,
+                "Esa existencia ya estaba habilitada.");
+        }
+
+        saldo.Activo = true;
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo,
+            "ReactivarExistencia",
+            usuarioId,
+            $"existencia={saldo.Id} | via=reactivar | " +
+            $"cantidadBase={Numero(saldo.CantidadBase)}",
+            cancellationToken);
+
+        await _inventario.GuardarCambiosAsync(cancellationToken);
+
+        return await ResultadoTrasGuardar(
+            saldo.Id,
+            $"'{saldo.Producto?.Nombre}' vuelve al listado de '{saldo.Sucursal?.Nombre}'.",
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Relee la fila ya guardada y arma el DTO.
+    ///
+    /// Se relee en vez de mapear la entidad en memoria porque en el alta las
+    /// navegaciones -sede, producto, unidad- no estan cargadas, y el DTO las
+    /// necesita para los nombres. Una consulta por operacion de escritura es
+    /// barata y evita tener dos formas distintas de construir el mismo DTO.
+    /// </summary>
+    private async Task<ResultadoExistencia> ResultadoTrasGuardar(
+        int id,
+        string mensaje,
+        CancellationToken cancellationToken)
+    {
+        var guardado = await _inventario.ObtenerExistenciaPorIdAsync(id, cancellationToken);
+
+        return guardado is null
+            ? ResultadoExistencia.Fallo(
+                ErrorExistencia.ExistenciaNoEncontrada,
+                $"La existencia {id} no se pudo releer despues de guardarla.")
+            : ResultadoExistencia.Ok(guardado.ToDto(), mensaje);
+    }
+
+    /// <summary>Un decimal para la bitacora, con punto y sin separador de miles.</summary>
+    private static string Numero(decimal valor) =>
+        valor.ToString("0.####", CultureInfo.InvariantCulture);
 
     public async Task<IReadOnlyList<LoteDto>> ObtenerLotesPorVencimientoAsync(
         int sucursalId,

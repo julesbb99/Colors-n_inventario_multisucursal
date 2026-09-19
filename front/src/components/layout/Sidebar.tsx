@@ -7,8 +7,10 @@ import {
   Receipt,
   Settings,
   ShoppingCart,
+  Users,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { useAuth } from '../../hooks/useAuth';
 
 interface ItemNav {
   etiqueta: string;
@@ -26,6 +28,12 @@ interface ItemNav {
   Icono: LucideIcon;
   /** `end` evita que "/" quede marcado como activo en todas las rutas hijas. */
   exacta?: boolean;
+  /**
+   * Se oculta al operador. NO es el control: `ProtectedRoute` desvía la ruta y
+   * la API responde 403. Esconder el enlace solo evita ofrecer una pantalla que
+   * daría error nada más abrirla.
+   */
+  soloSupervision?: boolean;
 }
 
 const ITEMS: ItemNav[] = [
@@ -35,6 +43,7 @@ const ITEMS: ItemNav[] = [
   { etiqueta: 'Traslados', ruta: '/traslados', Icono: ArrowLeftRight },
   { etiqueta: 'Compras', ruta: '/compras', Icono: ShoppingCart },
   { etiqueta: 'Ventas', ruta: '/ventas', Icono: Receipt },
+  { etiqueta: 'Usuarios', ruta: '/usuarios', Icono: Users, soloSupervision: true },
   { etiqueta: 'Configuración', ruta: null, Icono: Settings },
 ];
 
@@ -49,10 +58,14 @@ const BASE_ITEM =
   'flex h-11 items-center gap-3 border-l-4 pl-3 pr-3 text-sm transition';
 
 export function Sidebar() {
+  const { esSupervision } = useAuth();
+
+  const visibles = ITEMS.filter((item) => !item.soloSupervision || esSupervision);
+
   return (
     <aside className="flex w-56 shrink-0 flex-col bg-petroleo-800 py-4">
       <nav aria-label="Secciones" className="flex flex-col gap-0.5">
-        {ITEMS.map(({ etiqueta, ruta, Icono, exacta }) =>
+        {visibles.map(({ etiqueta, ruta, Icono, exacta }) =>
           ruta === null ? (
             <button
               key={etiqueta}

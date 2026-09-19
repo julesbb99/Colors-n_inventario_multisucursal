@@ -21,8 +21,68 @@ public interface IInventarioService
         CancellationToken cancellationToken = default);
 
     /// <summary>Existencias de una sede, o de toda la red si no se indica sede.</summary>
+    /// <param name="incluirInactivas">
+    /// <c>false</c> por defecto. En <c>true</c> devuelve tambien las dadas de
+    /// baja, que es lo que necesita la pestana desde la que se reactivan.
+    /// </param>
     Task<IReadOnlyList<InventarioSucursalDto>> ObtenerExistenciasAsync(
         int? sucursalId = null,
+        bool incluirInactivas = false,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Una existencia por su id, activa o no, o <c>null</c> si no existe.
+    ///
+    /// Existe sobre todo para el endpoint: necesita saber de QUE sede es antes
+    /// de decidir si quien pide puede modificarla.
+    /// </summary>
+    Task<InventarioSucursalDto?> ObtenerExistenciaPorIdAsync(
+        int id,
+        CancellationToken cancellationToken = default);
+
+    // -------------------------------------------------------------------------
+    // Altas, bajas y edicion de existencias
+    //
+    // LA AUTORIZACION NO ESTA AQUI. Estos metodos no comprueban sobre que sede
+    // puede operar quien llama: eso lo hace el endpoint con
+    // IUsuarioContexto.ExigirAccesoASucursal, igual que el resto del modulo, y
+    // por el mismo motivo -el servicio no depende del contexto HTTP-. Quien
+    // anada otra via de entrada tiene que acordarse.
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Empieza a manejar un producto en una sede. Nace con saldo CERO: la
+    /// mercancia entra despues por el libro mayor.
+    ///
+    /// Si la pareja ya existe pero esta dada de baja, la REACTIVA en vez de
+    /// fallar: el indice unico (sucursal, producto) impide crear otra fila, asi
+    /// que negarse dejaria a la persona sin salida desde la interfaz.
+    /// </summary>
+    Task<ResultadoExistencia> CrearExistenciaAsync(
+        CrearExistenciaDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Cambia el minimo de reposicion. Ni la cantidad ni el costo.</summary>
+    Task<ResultadoExistencia> ActualizarExistenciaAsync(
+        int id,
+        ActualizarExistenciaDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Baja logica: la existencia deja de listarse y de alertar, pero conserva
+    /// saldo, lotes e historia. Se niega si todavia tiene mercancia.
+    /// </summary>
+    Task<ResultadoExistencia> DesactivarExistenciaAsync(
+        int id,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Deshace la baja. Vuelve al listado con el saldo que tenia.</summary>
+    Task<ResultadoExistencia> ReactivarExistenciaAsync(
+        int id,
+        int usuarioId,
         CancellationToken cancellationToken = default);
 
     /// <summary>

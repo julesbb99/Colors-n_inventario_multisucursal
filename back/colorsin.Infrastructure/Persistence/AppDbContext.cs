@@ -266,6 +266,11 @@ public class AppDbContext : DbContext
             e.Property(x => x.CantidadBase).HasColumnName("cantidad_base").HasPrecision(14, 4).HasDefaultValue(0m);
             e.Property(x => x.StockMinimo).HasColumnName("stock_minimo").HasPrecision(14, 4).HasDefaultValue(0m);
             e.Property(x => x.CostoPromedio).HasColumnName("costo_promedio").HasPrecision(14, 4).HasDefaultValue(0m);
+            e.Property(x => x.Activo).HasColumnName("activo").HasDefaultValue(true);
+
+            // Indice de la migracion 12: el listado filtra por sede y por activas.
+            e.HasIndex(x => new { x.SucursalId, x.Activo })
+                .HasDatabaseName("idx_inventario_sucursal_activo");
 
             // Un solo saldo por pareja (sede, producto).
             e.HasIndex(x => new { x.SucursalId, x.ProductoId })
@@ -449,6 +454,7 @@ public class AppDbContext : DbContext
             e.Property(x => x.Nombre).HasColumnName("nombre").HasMaxLength(100).IsRequired();
             e.Property(x => x.Contacto).HasColumnName("contacto").HasMaxLength(100);
             e.Property(x => x.Telefono).HasColumnName("telefono").HasMaxLength(20).IsRequired();
+            e.Property(x => x.Activo).HasColumnName("activo").HasDefaultValue(true);
         });
 
         modelBuilder.Entity<ProductoProveedor>(e =>

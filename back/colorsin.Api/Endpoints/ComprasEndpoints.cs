@@ -34,13 +34,16 @@ public static class ComprasEndpoints
         // ---------------------------------------------------------------------
         grupo.MapGet("/proveedores", async (
                 IComprasService compras,
+                bool? incluirInactivos,
                 CancellationToken cancellationToken) =>
-            TypedResults.Ok(await compras.ObtenerProveedoresAsync(cancellationToken)))
+            TypedResults.Ok(await compras.ObtenerProveedoresAsync(
+                incluirInactivos ?? false, cancellationToken)))
             .WithName("ComprasProveedores")
             .WithSummary("Catalogo de proveedores")
             .WithDescription(
                 "No se filtra por sede: el catalogo de proveedores es de toda la red, no de una " +
-                "bodega. Lo que si es de una sede es la orden que se le hace.");
+                "bodega. Lo que si es de una sede es la orden que se le hace. " +
+                "Por defecto solo los activos; `incluirInactivos=true` anade los retirados.");
 
         grupo.MapGet("/proveedores/{id:int}", async (
                 int id,
@@ -53,6 +56,157 @@ public static class ComprasEndpoints
             .WithSummary("Un proveedor")
             .Produces<ProveedorDto>()
             .Produces(StatusCodes.Status404NotFound);
+
+        // ---------------------------------------------------------------------
+        // Proveedores: alta, edicion y retiro. SOLO ADMINISTRADOR GENERAL.
+        //
+        // Otra politica, no supervision con un rol menos. El motivo esta en
+        // PoliticasAutorizacion.SoloAdminGeneral y vale la pena repetirlo: el
+        // catalogo de proveedores y su lista de precios son COMPARTIDOS por las
+        // tres sedes, asi que aqui no hay ninguna sede sobre la que comprobar
+        // nada -por eso no se llama a ExigirAccesoASucursal- y un cambio lo
+        // hereda toda la red. Un gerente responde por su sede; esto se le sale.
+        // ---------------------------------------------------------------------
+        grupo.MapPost("/proveedores", async (
+                GuardarProveedorDto peticion,
+                IComprasService compras,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                var resultado = await compras.CrearProveedorAsync(
+                    peticion, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Created(
+                        $"/api/compras/proveedores/{resultado.Proveedor!.Id}", resultado)
+                    : RespuestasHttp.Fallo(
+                        CodigoDe(resultado.Error), "Proveedor rechazado", resultado.Mensaje);
+            })
+            .WithName("ComprasCrearProveedor")
+            .WithSummary("Da de alta un proveedor. Solo Administrador General.")
+            .WithDescription(
+                "El nombre es unico, sin distinguir mayusculas. Si ya existe pero esta retirado, " +
+                "la respuesta invita a reactivarlo en vez de crear otro: asi conserva su lista " +
+                "de precios y su historial de ordenes.")
+            .Produces<ResultadoProveedor>(StatusCodes.Status201Created)
+            .RequireAuthorization(PoliticasAutorizacion.SoloAdminGeneral);
+
+        grupo.MapPut("/proveedores/{id:int}", async (
+                int id,
+                GuardarProveedorDto peticion,
+                IComprasService compras,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                var resultado = await compras.ActualizarProveedorAsync(
+                    id, peticion, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Ok(resultado)
+                    : RespuestasHttp.Fallo(
+                        CodigoDe(resultado.Error), "Proveedor rechazado", resultado.Mensaje);
+            })
+            .WithName("ComprasActualizarProveedor")
+            .WithSummary("Cambia nombre, contacto o telefono. Solo Administrador General.")
+            .Produces<ResultadoProveedor>()
+            .RequireAuthorization(PoliticasAutorizacion.SoloAdminGeneral);
+
+        grupo.MapDelete("/proveedores/{id:int}", async (
+                int id,
+                IComprasService compras,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                var resultado = await compras.DesactivarProveedorAsync(
+                    id, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Ok(resultado)
+                    : RespuestasHttp.Fallo(
+                        CodigoDe(resultado.Error), "Proveedor rechazado", resultado.Mensaje);
+            })
+            .WithName("ComprasRetirarProveedor")
+            .WithSummary("BAJA LOGICA: retira al proveedor del catalogo. No borra nada.")
+            .WithDescription(
+                "Deja de ofrecerse al crear ordenes, pero conserva sus ordenes historicas y su " +
+                "lista de precios. NO existe borrado real, y no es una decision de estilo: " +
+                "`ordenes_compra` lo referencia con RESTRICT -MySQL rechazaria el borrado en " +
+                "cuanto tenga una orden- y `producto_proveedor` con CASCADE, que se llevaria su " +
+                "lista de precios por delante. Se deshace con .../reactivar.")
+            .Produces<ResultadoProveedor>()
+            .RequireAuthorization(PoliticasAutorizacion.SoloAdminGeneral);
+
+        grupo.MapPost("/proveedores/{id:int}/reactivar", async (
+                int id,
+                IComprasService compras,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                var resultado = await compras.ReactivarProveedorAsync(
+                    id, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Ok(resultado)
+                    : RespuestasHttp.Fallo(
+                        CodigoDe(resultado.Error), "Proveedor rechazado", resultado.Mensaje);
+            })
+            .WithName("ComprasReactivarProveedor")
+            .WithSummary("Deshace el retiro. Solo Administrador General.")
+            .Produces<ResultadoProveedor>()
+            .RequireAuthorization(PoliticasAutorizacion.SoloAdminGeneral);
+
+        // ---------------------------------------------------------------------
+        // Lista de precios
+        // ---------------------------------------------------------------------
+        grupo.MapGet("/precios", async (
+                int productoId,
+                int proveedorId,
+                IComprasService compras,
+                CancellationToken cancellationToken) =>
+            await compras.ObtenerPrecioReferenciaAsync(
+                productoId, proveedorId, cancellationToken) is { } precio
+                ? Results.Ok(precio)
+                : Results.NotFound())
+            .WithName("ComprasPrecioReferencia")
+            .WithSummary("Precio de lista y ultimo precio pagado de un producto a un proveedor")
+            .WithDescription(
+                "DEVUELVE DOS COSAS DISTINTAS Y NO LAS MEZCLA. `precioReferencia` es lo pactado " +
+                "en la lista, POR UNIDAD BASE del producto (`producto_proveedor` no tiene columna " +
+                "de unidad). `ultimaCompra` es lo que de verdad se cobro la ultima vez, CON LA " +
+                "UNIDAD EN QUE SE COTIZO y sin normalizar, para que la cifra coincida con la de " +
+                "la factura. Que no cuadren es justamente la informacion util. " +
+                "Mira el historico de TODA LA RED: lo que cobra un proveedor no depende de a que " +
+                "bodega entrega. Se ignoran las ordenes canceladas y las lineas sin precio. " +
+                "Cualquier rol autenticado puede consultarlo: es lo que hace falta para pedir " +
+                "con criterio.")
+            .Produces<PrecioReferenciaDto>()
+            .Produces(StatusCodes.Status404NotFound);
+
+        grupo.MapPut("/proveedores/{proveedorId:int}/precios/{productoId:int}", async (
+                int proveedorId,
+                int productoId,
+                GuardarPrecioReferenciaDto peticion,
+                IComprasService compras,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                var resultado = await compras.GuardarPrecioReferenciaAsync(
+                    proveedorId, productoId, peticion,
+                    contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Ok(resultado)
+                    : RespuestasHttp.Fallo(
+                        CodigoDe(resultado.Error), "Precio rechazado", resultado.Mensaje);
+            })
+            .WithName("ComprasGuardarPrecioReferencia")
+            .WithSummary("Fija el precio de lista de un producto. Solo Administrador General.")
+            .WithDescription(
+                "El precio va POR UNIDAD BASE del producto. Un `precioReferencia` nulo QUITA el " +
+                "producto de la lista de ese proveedor, sin tocar ninguna orden historica: las " +
+                "lineas guardan su propio precio, no una referencia a esta tabla.")
+            .Produces<ResultadoProveedor>()
+            .RequireAuthorization(PoliticasAutorizacion.SoloAdminGeneral);
 
         // ---------------------------------------------------------------------
         // Ordenes
@@ -120,15 +274,97 @@ public static class ComprasEndpoints
                         CodigoDe(resultado.Error), "Orden rechazada", resultado.Mensaje);
             })
             .WithName("ComprasCrearOrden")
-            .WithSummary("Crea una orden en estado Pendiente. Solo supervision.")
+            .WithSummary("Crea una orden en estado Pendiente. Cualquier rol, en su sede.")
             .WithDescription(
                 "No mueve stock: una orden es una intencion de compra. Las existencias cambian al " +
                 "confirmar la recepcion. Quien la crea sale del token. " +
-                "Restringido a Administrador General y Gerente de Sucursal.")
-            .Produces<ResultadoOrdenCompra>()
-            // Una orden compromete dinero con un proveedor. No mueve stock, pero
-            // si obliga a la empresa, y eso es de quien responde por la sede.
-            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+                "ABIERTO AL OPERADOR: una orden Pendiente es un borrador, no un compromiso; lo " +
+                "que obliga a la empresa es confirmarla o recibirla, y esas dos siguen siendo de " +
+                "supervision. La sede si se comprueba: solo se pide para la propia.")
+            .Produces<ResultadoOrdenCompra>();
+
+        // ---------------------------------------------------------------------
+        // Editar y retirar: SOLO MIENTRAS LA ORDEN SEA UN BORRADOR
+        //
+        // Las dos exigen estado 'Pendiente', y esa comprobacion vive en el
+        // SERVICIO, no aqui: es una regla de negocio sobre el ciclo de vida del
+        // documento, y si estuviera en el endpoint una via de entrada nueva
+        // podria saltarsela. El endpoint solo comprueba la sede, que es lo suyo.
+        //
+        // Hay que leer la orden antes para saber de que sede es. Misma razon que
+        // en la recepcion: el id de la orden no dice nada de la bodega.
+        // ---------------------------------------------------------------------
+        grupo.MapPut("/ordenes/{id:int}", async (
+                int id,
+                CrearOrdenCompraDto peticion,
+                IComprasService compras,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                var actual = await compras.ObtenerOrdenPorIdAsync(id, cancellationToken);
+                if (actual is null)
+                {
+                    return RespuestasHttp.Fallo(
+                        StatusCodes.Status404NotFound,
+                        "Orden no encontrada",
+                        $"No existe la orden {id}.");
+                }
+
+                contexto.ExigirAccesoASucursal(actual.SucursalId);
+
+                var resultado = await compras.ActualizarOrdenAsync(
+                    id, peticion, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Ok(resultado)
+                    : RespuestasHttp.Fallo(
+                        CodigoDe(resultado.Error), "Orden rechazada", resultado.Mensaje);
+            })
+            .WithName("ComprasActualizarOrden")
+            .WithSummary("Edita una orden Pendiente. Cualquier rol, en su sede.")
+            .WithDescription(
+                "REEMPLAZA las lineas: las que van en el cuerpo sustituyen a las que habia, que " +
+                "es lo que significa un PUT. Cambia proveedor, plazo y lineas; NO cambia la sede " +
+                "-mover una orden de bodega es otra orden- ni quien la creo. " +
+                "Responde 409 si la orden ya salio de 'Pendiente': desde ahi hay un compromiso " +
+                "con el proveedor y, si entro mercancia, movimientos en el libro mayor que la " +
+                "citan.")
+            .Produces<ResultadoOrdenCompra>();
+
+        grupo.MapDelete("/ordenes/{id:int}", async (
+                int id,
+                IComprasService compras,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                var actual = await compras.ObtenerOrdenPorIdAsync(id, cancellationToken);
+                if (actual is null)
+                {
+                    return RespuestasHttp.Fallo(
+                        StatusCodes.Status404NotFound,
+                        "Orden no encontrada",
+                        $"No existe la orden {id}.");
+                }
+
+                contexto.ExigirAccesoASucursal(actual.SucursalId);
+
+                var resultado = await compras.CancelarOrdenAsync(
+                    id, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Ok(resultado)
+                    : RespuestasHttp.Fallo(
+                        CodigoDe(resultado.Error), "Orden rechazada", resultado.Mensaje);
+            })
+            .WithName("ComprasCancelarOrden")
+            .WithSummary("Retira una orden Pendiente pasandola a Cancelada. No borra nada.")
+            .WithDescription(
+                "El estado 'Cancelada' ya existia en el esquema para esto. La fila se conserva " +
+                "con su detalle, que es lo que permite responder despues a 'quien pidio esto y " +
+                "por que no llego'; la interfaz la esconde del listado del dia. " +
+                "Responde 409 si la orden ya fue confirmada o recibida: a partir de ahi es el " +
+                "documento que respalda lo que entro a la bodega.")
+            .Produces<ResultadoOrdenCompra>();
 
         // ---------------------------------------------------------------------
         // Recepcion
@@ -189,10 +425,16 @@ public static class ComprasEndpoints
             or ErrorCompra.ProductoNoEncontrado
             or ErrorCompra.UnidadNoEncontrada
             or ErrorCompra.OrdenNoEncontrada
+            or ErrorCompra.PrecioNoEncontrado
             => StatusCodes.Status404NotFound,
 
+        // 409: la peticion esta bien formada y quien la manda tiene permiso; lo
+        // que no la admite es el estado actual de los datos.
         ErrorCompra.EstadoNoPermiteRecepcion
             or ErrorCompra.NadaPorRecibir
+            or ErrorCompra.EstadoNoPermiteEdicion
+            or ErrorCompra.ProveedorDuplicado
+            or ErrorCompra.ProveedorEstadoSinCambio
             => StatusCodes.Status409Conflict,
 
         _ => StatusCodes.Status400BadRequest

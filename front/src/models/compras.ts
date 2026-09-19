@@ -8,16 +8,29 @@
 /** Estados tal como los serializa la API. */
 export type EstadoOrdenCompra =
   | 'Pendiente'
+  | 'Confirmada'
   | 'ParcialmenteRecibida'
   | 'Recibida'
   | 'Cancelada';
 
 export const ETIQUETA_ESTADO_ORDEN: Record<EstadoOrdenCompra, string> = {
   Pendiente: 'Pendiente',
+  Confirmada: 'Confirmada',
   ParcialmenteRecibida: 'Parcial',
   Recibida: 'Recibida',
   Cancelada: 'Cancelada',
 };
+
+/**
+ * Una orden solo se edita o se retira mientras sea un BORRADOR.
+ *
+ * Desde 'Confirmada' en adelante hay un compromiso con el proveedor y, si entró
+ * mercancía, movimientos en el libro mayor que citan esta orden. La API rechaza
+ * con 409 cualquier otro estado; esto solo evita ofrecer el botón.
+ */
+export function esBorrador(estado: EstadoOrdenCompra | null): boolean {
+  return estado === 'Pendiente';
+}
 
 export interface ProveedorDto {
   id: number;
@@ -26,6 +39,55 @@ export interface ProveedorDto {
   telefono: string;
   /** Cuantos productos surte. Nulo cuando la consulta no lo calculo. */
   productosQueSurte: number | null;
+  /** `false` si está retirado: no se ofrece en órdenes nuevas, conserva historia. */
+  activo: boolean;
+}
+
+/** Alta o edición de un proveedor. Solo Administrador General. */
+export interface GuardarProveedorDto {
+  nombre: string;
+  contacto: string | null;
+  telefono: string;
+}
+
+/**
+ * Lo que se sabe del precio de un producto con un proveedor.
+ *
+ * SON DOS COSAS DISTINTAS Y NO SE MEZCLAN:
+ *
+ *   precioReferencia  lo pactado en la lista, POR UNIDAD BASE del producto.
+ *   ultimaCompra      lo que de verdad se cobró la última vez, CON LA UNIDAD EN
+ *                     QUE SE COTIZÓ, sin normalizar, para que la cifra coincida
+ *                     con la de la factura.
+ *
+ * Que no cuadren es justamente la información útil.
+ */
+export interface PrecioReferenciaDto {
+  productoId: number;
+  productoNombre: string;
+  proveedorId: number;
+  proveedorNombre: string;
+  /** Unidad en la que viene `precioReferencia`. */
+  unidadBaseSimbolo: string | null;
+  /** Nulo si ese proveedor no tiene el producto en su lista. No es cero. */
+  precioReferencia: number | null;
+  ultimaCompra: UltimaCompraDto | null;
+}
+
+export interface UltimaCompraDto {
+  ordenCompraId: number;
+  fecha: string;
+  cantidad: number | null;
+  unidadId: number;
+  unidadSimbolo: string | null;
+  precioUnitario: number | null;
+  descuento: number;
+  estado: string;
+}
+
+/** Un precio nulo QUITA el producto de la lista de ese proveedor. */
+export interface GuardarPrecioReferenciaDto {
+  precioReferencia: number | null;
 }
 
 export interface DetalleOrdenCompraDto {
@@ -62,6 +124,13 @@ export interface OrdenCompraDto {
   total: number;
   /** Lineas a las que todavia les falta mercancia por llegar. */
   lineasPendientes: number;
+  /**
+   * Cuántas líneas tiene la orden.
+   *
+   * Viene aparte porque `detalles` llega VACÍO en los listados: contar ahí daba
+   * cero, y la tabla mostraba «1 de 0».
+   */
+  lineasTotales: number;
 }
 
 export interface CrearLineaOrdenCompraDto {

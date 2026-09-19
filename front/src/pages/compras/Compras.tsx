@@ -1,11 +1,15 @@
 import { useMemo, useState } from 'react';
-import { PackageCheck, Plus } from 'lucide-react';
+import { Building2, PackageCheck, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useSede } from '../../hooks/useSede';
 import { useConsulta } from '../../hooks/useConsulta';
-import { obtenerOrdenesCompra } from '../../services/compras';
-import { ETIQUETA_ESTADO_ORDEN } from '../../models/compras';
+import { useEnvio } from '../../hooks/useEnvio';
+import { cancelarOrdenCompra, obtenerOrdenesCompra } from '../../services/compras';
+import { ETIQUETA_ESTADO_ORDEN, esBorrador } from '../../models/compras';
 import type { EstadoOrdenCompra, OrdenCompraDto } from '../../models/compras';
+import { GestionProveedores } from '../../components/compras/GestionProveedores';
+import { Modal } from '../../components/ui/Modal';
+import { Spinner } from '../../components/ui/Spinner';
 import { DataTable } from '../../components/ui/DataTable';
 import type { ColumnaTabla } from '../../components/ui/DataTable';
 import { StatusBadge } from '../../components/ui/StatusBadge';
@@ -18,28 +22,37 @@ import { formatearCOP, formatearEntero, formatearFechaSolo } from '../../utils/f
 
 const ESTADO_BADGE: Record<EstadoOrdenCompra, EstadoBadge> = {
   Pendiente: 'neutral',
+  Confirmada: 'activo',
   ParcialmenteRecibida: 'advertencia',
   Recibida: 'exitoso',
   Cancelada: 'inactivo',
 };
 
-type Pestana = 'todas' | 'pendientes' | 'recibidas';
+type Pestana = 'todas' | 'pendientes' | 'recibidas' | 'canceladas';
 
 const PESTANAS: { id: Pestana; etiqueta: string }[] = [
   { id: 'todas', etiqueta: 'Todas' },
   { id: 'pendientes', etiqueta: 'Por recibir' },
   { id: 'recibidas', etiqueta: 'Recibidas' },
+  { id: 'canceladas', etiqueta: 'Canceladas' },
 ];
 
 const SIN_DATOS: OrdenCompraDto[] = [];
+
+interface AccionesFila {
+  onRecibir: ((orden: OrdenCompraDto) => void) | null;
+  onEditar: (orden: OrdenCompraDto) => void;
+  onRetirar: (orden: OrdenCompraDto) => void;
+  /** Si quien mira puede modificar ESA orden. Se decide por fila, por la sede. */
+  puedeModificar: (orden: OrdenCompraDto) => boolean;
+}
 
 /**
  * Las columnas dependen del rol: la de acciones solo existe para supervisión.
  * Por eso se construyen en una función y no en una constante de módulo.
  */
-function construirColumnas(
-  onRecibir: ((orden: OrdenCompraDto) => void) | null,
-): ColumnaTabla<OrdenCompraDto>[] {
+function construirColumnas(acciones: AccionesFila): ColumnaTabla<OrdenCompraDto>[] {
+  const { onRecibir, onEditar, onRetirar, puedeModificar } = acciones;
   const columnas: ColumnaTabla<OrdenCompraDto>[] = [
   {
     id: 'numero',
@@ -63,13 +76,15 @@ function construirColumnas(
     render: (o) => (
       // Lo que importa de una orden abierta no es cuántas líneas tiene sino
       // cuántas siguen esperando mercancía.
+      // `lineasTotales` y NO `detalles.length`: el listado no trae las líneas,
+      // así que contarlas ahí daba siempre cero y la celda decía «1 de 0».
       <span className="tabular-nums text-slate-600">
         {o.lineasPendientes > 0 ? (
           <span className="font-semibold text-amber-700">
-            {formatearEntero(o.lineasPendientes)} de {formatearEntero(o.detalles.length)}
+            {formatearEntero(o.lineasPendientes)} de {formatearEntero(o.lineasTotales)}
           </span>
         ) : (
-          formatearEntero(o.detalles.length)
+          formatearEntero(o.lineasTotales)
         )}
       </span>
     ),
@@ -98,37 +113,78 @@ function construirColumnas(
   },
   ];
 
-  if (onRecibir !== null) {
-    columnas.push({
-      id: 'acciones',
-      header: '',
-      align: 'derecha',
-      render: (orden) =>
-        // Solo tiene sentido en una orden con líneas pendientes: una ya recibida
-        // no admite otra recepción y el botón solo llevaría a un 409.
-        orden.lineasPendientes > 0 ? (
-          <button
-            type="button"
-            onClick={() => onRecibir(orden)}
-            title="Registrar recepción"
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-terracota-400 hover:text-terracota-700"
-          >
-            <PackageCheck size={15} aria-hidden="true" />
-            Recibir
-          </button>
-        ) : null,
-    });
-  }
+  columnas.push({
+    id: 'acciones',
+    header: '',
+    align: 'derecha',
+    ancho: 'w-44',
+    render: (orden) => {
+      // Editar y retirar solo mientras sea un BORRADOR. Desde 'Confirmada' hay
+      // un compromiso con el proveedor y, si entró mercancía, movimientos en el
+      // libro mayor que citan esta orden. La API responde 409; esto solo evita
+      // ofrecer el botón.
+      const borrador = esBorrador(orden.estado) && puedeModificar(orden);
+
+      // Recibir solo tiene sentido con líneas pendientes: una ya recibida no
+      // admite otra recepción y el botón solo llevaría a un 409.
+      const puedeRecibir = onRecibir !== null && orden.lineasPendientes > 0;
+
+      if (!borrador && !puedeRecibir) {
+        return null;
+      }
+
+      return (
+        <span className="flex items-center justify-end gap-1">
+          {borrador ? (
+            <>
+              <button
+                type="button"
+                onClick={() => onEditar(orden)}
+                title="Editar la orden"
+                aria-label={`Editar la orden ${orden.id}`}
+                className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+              >
+                <Pencil size={16} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onRetirar(orden)}
+                title="Retirar la orden. Queda como Cancelada, no se borra."
+                aria-label={`Retirar la orden ${orden.id}`}
+                className="rounded-md p-1.5 text-slate-500 transition hover:bg-terracota-50 hover:text-terracota-700"
+              >
+                <Trash2 size={16} aria-hidden="true" />
+              </button>
+            </>
+          ) : null}
+
+          {puedeRecibir ? (
+            <button
+              type="button"
+              onClick={() => onRecibir!(orden)}
+              title="Registrar recepción"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-terracota-400 hover:text-terracota-700"
+            >
+              <PackageCheck size={15} aria-hidden="true" />
+              Recibir
+            </button>
+          ) : null}
+        </span>
+      );
+    },
+  });
 
   return columnas;
 }
 
 export function Compras() {
   const { sedeActiva, nombreSedeActiva } = useSede();
-  const { esSupervision } = useAuth();
+  const { esSupervision, esAdminGeneral, sucursalId: sedePropia } = useAuth();
   const [pestana, setPestana] = useState<Pestana>('todas');
-  const [creando, setCreando] = useState(false);
+  const [formulario, setFormulario] = useState<{ orden: OrdenCompraDto | null } | null>(null);
   const [recibiendo, setRecibiendo] = useState<OrdenCompraDto | null>(null);
+  const [aRetirar, setARetirar] = useState<OrdenCompraDto | null>(null);
+  const [proveedoresAbierto, setProveedoresAbierto] = useState(false);
 
   const {
     datos: ordenes,
@@ -138,29 +194,66 @@ export function Compras() {
     recargar,
   } = useConsulta(() => obtenerOrdenesCompra(sedeActiva), [sedeActiva], SIN_DATOS);
 
+  const { enviando, error: errorAccion, esPermisos: accionEsPermisos, enviar } = useEnvio();
+
+  /**
+   * Si quien mira puede modificar ESA orden.
+   *
+   * Por sede, no por rol: crear y editar una orden Pendiente está abierto a
+   * cualquier rol -es un borrador- pero solo en la sede propia. No es el
+   * control: la API comprueba lo mismo.
+   */
+  const puedeModificar = useMemo(
+    () => (orden: OrdenCompraDto) => esAdminGeneral || orden.sucursalId === sedePropia,
+    [esAdminGeneral, sedePropia],
+  );
+
   const columnas = useMemo(
-    () => construirColumnas(esSupervision ? setRecibiendo : null),
-    [esSupervision],
+    () =>
+      construirColumnas({
+        onRecibir: esSupervision ? setRecibiendo : null,
+        onEditar: (orden) => setFormulario({ orden }),
+        onRetirar: setARetirar,
+        puedeModificar,
+      }),
+    [esSupervision, puedeModificar],
   );
 
   const conteos = useMemo(
     () => ({
-      todas: ordenes.length,
-      pendientes: ordenes.filter((o) => o.lineasPendientes > 0).length,
+      // "Todas" excluye las canceladas: una orden retirada no forma parte del
+      // trabajo del día, tiene su propia pestaña. Mismo criterio que las
+      // existencias deshabilitadas.
+      todas: ordenes.filter((o) => o.estado !== 'Cancelada').length,
+      pendientes: ordenes.filter((o) => o.estado !== 'Cancelada' && o.lineasPendientes > 0).length,
       recibidas: ordenes.filter((o) => o.estado === 'Recibida').length,
+      canceladas: ordenes.filter((o) => o.estado === 'Cancelada').length,
     }),
     [ordenes],
   );
 
   const filtradas = useMemo(() => {
+    if (pestana === 'canceladas') {
+      return ordenes.filter((o) => o.estado === 'Cancelada');
+    }
+
+    const vigentes = ordenes.filter((o) => o.estado !== 'Cancelada');
+
     if (pestana === 'pendientes') {
-      return ordenes.filter((o) => o.lineasPendientes > 0);
+      return vigentes.filter((o) => o.lineasPendientes > 0);
     }
     if (pestana === 'recibidas') {
-      return ordenes.filter((o) => o.estado === 'Recibida');
+      return vigentes.filter((o) => o.estado === 'Recibida');
     }
-    return ordenes;
+    return vigentes;
   }, [ordenes, pestana]);
+
+  const VACIOS: Record<Pestana, string> = {
+    todas: 'No hay órdenes de compra registradas para esta sede.',
+    pendientes: 'No hay órdenes esperando mercancía.',
+    recibidas: 'Ninguna orden se ha recibido todavía.',
+    canceladas: 'No hay órdenes retiradas.',
+  };
 
   return (
     <div className="flex flex-col gap-5">
@@ -198,18 +291,87 @@ export function Compras() {
           {nombreSedeActiva} · una orden no mueve stock: eso lo hace su recepción
         </p>
 
-        {/* Comprometer dinero con un proveedor es decisión de quien responde por
-            el resultado de la sede: solo supervisión, igual que en la API. */}
-        {esSupervision ? (
-          <Boton onClick={() => setCreando(true)}>
-            <Plus size={17} aria-hidden="true" />
-            Nueva orden
+        {/* El catálogo de proveedores y sus precios son de toda la red: solo el
+            Administrador General los toca, igual que en la API. */}
+        {esAdminGeneral ? (
+          <Boton variante="secundaria" onClick={() => setProveedoresAbierto(true)}>
+            <Building2 size={17} aria-hidden="true" />
+            Proveedores
           </Boton>
         ) : null}
+
+        {/* Abierto a cualquier rol: una orden Pendiente es un borrador. Lo que
+            obliga a la empresa es confirmarla o recibirla, y eso sigue siendo
+            de supervisión. */}
+        <Boton onClick={() => setFormulario({ orden: null })}>
+          <Plus size={17} aria-hidden="true" />
+          Nueva orden
+        </Boton>
       </div>
 
-      {creando ? (
-        <FormularioOrdenCompra onCerrar={() => setCreando(false)} onCreada={recargar} />
+      {formulario ? (
+        <FormularioOrdenCompra
+          orden={formulario.orden}
+          onCerrar={() => setFormulario(null)}
+          onCreada={recargar}
+        />
+      ) : null}
+
+      {proveedoresAbierto ? (
+        <GestionProveedores onCerrar={() => setProveedoresAbierto(false)} />
+      ) : null}
+
+      {aRetirar ? (
+        <Modal
+          titulo={`Retirar la orden #${aRetirar.id}`}
+          descripcion={`${aRetirar.proveedorNombre} — ${aRetirar.sucursalNombre}`}
+          ocupado={enviando}
+          onCerrar={() => setARetirar(null)}
+          pie={
+            <>
+              <Boton variante="secundaria" onClick={() => setARetirar(null)} disabled={enviando}>
+                Cancelar
+              </Boton>
+              <Boton
+                onClick={() => {
+                  const orden = aRetirar;
+                  setARetirar(null);
+                  void enviar(async () => {
+                    await cancelarOrdenCompra(orden.id);
+                    recargar();
+                  });
+                }}
+                disabled={enviando}
+              >
+                {enviando ? (
+                  <>
+                    <Spinner etiqueta="Retirando" />
+                    Retirando…
+                  </>
+                ) : (
+                  'Retirar orden'
+                )}
+              </Boton>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-3 text-sm text-slate-600">
+            <p>
+              La orden pasa a <strong className="font-semibold text-slate-900">Cancelada</strong> y
+              sale del listado del día. <strong className="font-semibold">No se borra</strong>: se
+              conserva con su detalle en la pestaña «Canceladas», que es lo que permite responder
+              después a quién pidió esto y por qué no llegó.
+            </p>
+            <p className="rounded-lg bg-slate-50 px-3 py-2">
+              Solo se puede mientras siga Pendiente. Una vez confirmada o recibida, la orden es el
+              documento que respalda lo que entró a la bodega.
+            </p>
+          </div>
+        </Modal>
+      ) : null}
+
+      {errorAccion ? (
+        <Alerta tipo={accionEsPermisos ? 'permisos' : 'error'}>{errorAccion}</Alerta>
       ) : null}
 
       {recibiendo ? (
@@ -228,7 +390,7 @@ export function Compras() {
           data={filtradas}
           claveFila={(o) => o.id}
           cargando={cargando}
-          estadoVacio="No hay órdenes de compra registradas para esta sede."
+          estadoVacio={VACIOS[pestana]}
         />
       )}
     </div>

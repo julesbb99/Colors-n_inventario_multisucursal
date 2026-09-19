@@ -23,22 +23,35 @@ public static class MapeosCompras
         proveedor.Telefono,
         // Nulo, no cero, cuando la consulta no pidio el conteo: cero significa
         // "no surte ninguno", que es una respuesta distinta de "no se sabe".
-        contarProductos ? proveedor.Productos.Count : null);
+        contarProductos ? proveedor.Productos.Count : null,
+        proveedor.Activo);
+
+    /// <summary>Importe bruto de una linea, antes de descuento.</summary>
+    private static decimal Bruto(OrdenCompraDetalle detalle) =>
+        Redondear((detalle.Cantidad ?? 0m) * (detalle.PrecioUnitario ?? 0m));
+
+    /// <summary>
+    /// `descuento` es un PORCENTAJE (0..100), no un importe. Tratarlo como
+    /// importe rebajaria 15 pesos donde debe rebajar el 15%.
+    /// </summary>
+    private static decimal ValorDescuento(OrdenCompraDetalle detalle) =>
+        Redondear(Bruto(detalle) * detalle.Descuento / 100m);
+
+    /// <summary>
+    /// Lo que falta por recibir de una linea.
+    ///
+    /// Nunca negativo: el CHECK `chk_ocd_cantidad_recibida` impide que lo
+    /// recibido supere lo pedido, pero el Max protege igual del caso en que
+    /// `cantidad` sea nula.
+    /// </summary>
+    private static decimal Pendiente(OrdenCompraDetalle detalle) =>
+        Math.Max(0m, (detalle.Cantidad ?? 0m) - detalle.CantidadRecibida);
 
     public static DetalleOrdenCompraDto ToDto(this OrdenCompraDetalle detalle)
     {
-        var cantidad = detalle.Cantidad ?? 0m;
-        var precio = detalle.PrecioUnitario ?? 0m;
-
-        var bruto = Redondear(cantidad * precio);
-        // `descuento` es un PORCENTAJE (0..100), no un importe. Tratarlo como
-        // importe rebajaria 15 pesos donde debe rebajar el 15%.
-        var valorDescuento = Redondear(bruto * detalle.Descuento / 100m);
-
-        // Nunca negativo: el CHECK `chk_ocd_cantidad_recibida` impide que lo
-        // recibido supere lo pedido, pero el Max protege igual del caso en que
-        // `cantidad` sea nula.
-        var pendiente = Math.Max(0m, cantidad - detalle.CantidadRecibida);
+        var bruto = Bruto(detalle);
+        var valorDescuento = ValorDescuento(detalle);
+        var pendiente = Pendiente(detalle);
 
         return new DetalleOrdenCompraDto(
             detalle.Id,
@@ -69,6 +82,18 @@ public static class MapeosCompras
             ? orden.Detalles.Select(d => d.ToDto()).ToList()
             : [];
 
+        // EL TOTAL Y LAS LINEAS PENDIENTES SE CALCULAN SOBRE orden.Detalles, NO
+        // SOBRE `detalles`.
+        //
+        // Parecen lo mismo y no lo son: en el listado `detalles` va vacio a
+        // proposito -devolver las lineas de cien ordenes es una carga que nadie
+        // mira- mientras que orden.Detalles si viene cargado. Cuando esto
+        // dependia de la lista recortada, TODAS las ordenes del listado salian
+        // con total 0 y sin lineas pendientes, asi que la columna Total mostraba
+        // $0 siempre y la pestana "Por recibir" no encontraba nada nunca.
+        var total = orden.Detalles.Sum(d => Bruto(d) - ValorDescuento(d));
+        var lineasPendientes = orden.Detalles.Count(d => Pendiente(d) > 0m);
+
         return new OrdenCompraDto(
             orden.Id,
             orden.ProveedorId,
@@ -81,8 +106,9 @@ public static class MapeosCompras
             orden.Estado?.ToString(),
             orden.PlazoPagoDias,
             detalles,
-            detalles.Sum(d => d.SubtotalNeto),
-            detalles.Count(d => !d.Completa));
+            total,
+            lineasPendientes,
+            orden.Detalles.Count);
     }
 
     private static decimal Redondear(decimal valor) =>

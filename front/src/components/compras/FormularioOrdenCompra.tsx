@@ -3,16 +3,26 @@ import { Plus, Trash2 } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 import { Boton } from '../ui/Boton';
 import { Alerta } from '../ui/Alerta';
-import { Spinner } from '../ui/Spinner';
+import { CargandoPanel, Spinner } from '../ui/Spinner';
 import { CampoNumero, CampoSelect } from '../ui/Campos';
 import { CampoSede } from '../ui/CampoSede';
 import { useSede } from '../../hooks/useSede';
 import { useCatalogos } from '../../hooks/useCatalogos';
 import { useConsulta } from '../../hooks/useConsulta';
 import { useEnvio } from '../../hooks/useEnvio';
-import { crearOrdenCompra, obtenerProveedores } from '../../services/compras';
-import type { CrearLineaOrdenCompraDto, ProveedorDto } from '../../models/compras';
+import {
+  actualizarOrdenCompra,
+  crearOrdenCompra,
+  obtenerOrdenCompra,
+  obtenerProveedores,
+} from '../../services/compras';
+import type {
+  CrearLineaOrdenCompraDto,
+  OrdenCompraDto,
+  ProveedorDto,
+} from '../../models/compras';
 import { formatearCOP } from '../../utils/formato';
+import { PanelPreciosReferencia } from './PanelPreciosReferencia';
 
 interface LineaBorrador {
   clave: number;
@@ -30,22 +40,105 @@ function lineaVacia(clave: number): LineaBorrador {
 const SIN_PROVEEDORES: ProveedorDto[] = [];
 
 interface FormularioOrdenCompraProps {
+  /**
+   * La orden que se edita, o `null` para una nueva.
+   *
+   * Solo se puede pasar una orden en 'Pendiente': la API rechaza con 409
+   * cualquier otro estado, y la pantalla ya no ofrece el botón.
+   */
+  orden?: OrdenCompraDto | null;
   onCerrar: () => void;
   onCreada: () => void;
 }
 
-export function FormularioOrdenCompra({ onCerrar, onCreada }: FormularioOrdenCompraProps) {
+/**
+ * Al EDITAR hay que volver a pedir la orden por id.
+ *
+ * La que llega por parámetro viene del LISTADO, y el listado no trae las líneas
+ * -serían cientos de filas que nadie mira-, así que su `detalles` está vacío. Si
+ * el formulario se armara con eso, abriría con una línea en blanco y guardar
+ * REEMPLAZARÍA las líneas reales por esa: el PUT sustituye, no parchea. Sería
+ * pérdida de datos silenciosa.
+ *
+ * Por eso el formulario de verdad no se monta hasta tener la orden completa: sus
+ * campos se inicializan una sola vez, al montarse.
+ */
+export function FormularioOrdenCompra({
+  orden = null,
+  onCerrar,
+  onCreada,
+}: FormularioOrdenCompraProps) {
+  const { datos, cargando, error } = useConsulta(
+    () => (orden === null ? Promise.resolve(null) : obtenerOrdenCompra(orden.id)),
+    [orden?.id ?? 0],
+    null as OrdenCompraDto | null,
+  );
+
+  if (orden === null) {
+    return <FormularioOrdenInterno orden={null} onCerrar={onCerrar} onCreada={onCreada} />;
+  }
+
+  if (error !== null) {
+    return (
+      <Modal titulo={`Editar orden #${orden.id}`} onCerrar={onCerrar}>
+        <Alerta tipo="error">{error}</Alerta>
+      </Modal>
+    );
+  }
+
+  if (cargando || datos === null) {
+    return (
+      <Modal titulo={`Editar orden #${orden.id}`} onCerrar={onCerrar}>
+        <CargandoPanel texto="Cargando las líneas de la orden…" />
+      </Modal>
+    );
+  }
+
+  return <FormularioOrdenInterno orden={datos} onCerrar={onCerrar} onCreada={onCreada} />;
+}
+
+function FormularioOrdenInterno({
+  orden = null,
+  onCerrar,
+  onCreada,
+}: FormularioOrdenCompraProps) {
   const { sedeActiva } = useSede();
   const { opcionesProducto, opcionesUnidad, unidadBaseDe } = useCatalogos();
   const { enviando, error, esPermisos, enviar } = useEnvio();
 
-  const { datos: proveedores } = useConsulta(() => obtenerProveedores(), [], SIN_PROVEEDORES);
+  const esEdicion = orden !== null;
 
-  const [proveedorId, setProveedorId] = useState('');
-  const [sucursalId, setSucursalId] = useState(sedeActiva === null ? '' : String(sedeActiva));
-  const [plazoPagoDias, setPlazoPagoDias] = useState('');
-  const [lineas, setLineas] = useState<LineaBorrador[]>([lineaVacia(0)]);
-  const [siguienteClave, setSiguienteClave] = useState(1);
+  // Con las inactivas incluidas SOLO al editar: si una orden vieja apunta a un
+  // proveedor ya retirado, sin esto el selector saldría vacío y guardar la
+  // orden la reasignaría en silencio a otro proveedor.
+  const { datos: proveedores } = useConsulta(
+    () => obtenerProveedores(esEdicion),
+    [esEdicion],
+    SIN_PROVEEDORES,
+  );
+
+  const [proveedorId, setProveedorId] = useState(orden ? String(orden.proveedorId) : '');
+  const [sucursalId, setSucursalId] = useState(
+    orden ? String(orden.sucursalId) : sedeActiva === null ? '' : String(sedeActiva),
+  );
+  const [plazoPagoDias, setPlazoPagoDias] = useState(
+    orden?.plazoPagoDias == null ? '' : String(orden.plazoPagoDias),
+  );
+  const [lineas, setLineas] = useState<LineaBorrador[]>(
+    orden && orden.detalles.length > 0
+      ? orden.detalles.map((detalle, indice) => ({
+          clave: indice,
+          productoId: String(detalle.productoId),
+          cantidad: detalle.cantidad === null ? '' : String(detalle.cantidad),
+          unidadId: String(detalle.unidadId),
+          precioUnitario: detalle.precioUnitario === null ? '' : String(detalle.precioUnitario),
+          descuento: detalle.descuento === 0 ? '' : String(detalle.descuento),
+        }))
+      : [lineaVacia(0)],
+  );
+  const [siguienteClave, setSiguienteClave] = useState(
+    orden && orden.detalles.length > 0 ? orden.detalles.length : 1,
+  );
   const [validacion, setValidacion] = useState<string | null>(null);
 
   function actualizarLinea(clave: number, cambios: Partial<LineaBorrador>) {
@@ -110,13 +203,19 @@ export function FormularioOrdenCompra({ onCerrar, onCreada }: FormularioOrdenCom
       return;
     }
 
+    const cuerpo = {
+      proveedorId: Number(proveedorId),
+      sucursalId: Number(sucursalId),
+      plazoPagoDias: plazoPagoDias === '' ? null : Number(plazoPagoDias),
+      lineas: lineasValidas,
+    };
+
     void enviar(async () => {
-      await crearOrdenCompra({
-        proveedorId: Number(proveedorId),
-        sucursalId: Number(sucursalId),
-        plazoPagoDias: plazoPagoDias === '' ? null : Number(plazoPagoDias),
-        lineas: lineasValidas,
-      });
+      if (orden) {
+        await actualizarOrdenCompra(orden.id, cuerpo);
+      } else {
+        await crearOrdenCompra(cuerpo);
+      }
       onCreada();
       onCerrar();
     });
@@ -124,8 +223,12 @@ export function FormularioOrdenCompra({ onCerrar, onCreada }: FormularioOrdenCom
 
   return (
     <Modal
-      titulo="Nueva orden de compra"
-      descripcion="La orden compromete dinero con el proveedor pero NO mueve stock: eso ocurre cuando se registra su recepción."
+      titulo={esEdicion ? `Editar orden #${orden.id}` : 'Nueva orden de compra'}
+      descripcion={
+        esEdicion
+          ? 'Solo se edita mientras la orden siga Pendiente. Las líneas que dejes aquí reemplazan a las que tenía.'
+          : 'La orden compromete dinero con el proveedor pero NO mueve stock: eso ocurre cuando se registra su recepción.'
+      }
       ancho="xl"
       ocupado={enviando}
       onCerrar={onCerrar}
@@ -141,9 +244,11 @@ export function FormularioOrdenCompra({ onCerrar, onCreada }: FormularioOrdenCom
           <Boton onClick={alGuardar} disabled={enviando}>
             {enviando ? (
               <>
-                <Spinner etiqueta="Creando" />
-                Creando…
+                <Spinner etiqueta="Guardando" />
+                Guardando…
               </>
+            ) : esEdicion ? (
+              'Guardar cambios'
             ) : (
               'Crear orden'
             )}
@@ -259,6 +364,21 @@ export function FormularioOrdenCompra({ onCerrar, onCreada }: FormularioOrdenCom
             </div>
           ))}
         </div>
+
+        {/* Debajo de las líneas, que es donde se está mirando al digitar el
+            precio. Consulta la lista pactada y lo que de verdad se cobró la
+            última vez, y convierte las dos cifras a la unidad que se elija. */}
+        <PanelPreciosReferencia
+          proveedorId={proveedorId}
+          lineas={lineas}
+          disabled={enviando}
+          onUsarPrecio={(clave, precio) =>
+            // Se redondea a peso: la orden se cotiza en pesos y un precio con
+            // decimales arrastrados de la conversión no se puede escribir en
+            // una factura.
+            actualizarLinea(clave, { precioUnitario: String(Math.round(precio)) })
+          }
+        />
       </div>
     </Modal>
   );

@@ -10,9 +10,14 @@ namespace Colorsin.Application.Compras.DTOs;
 /// Nulo cuando la consulta no pidio ese conteo, que NO es lo mismo que cero:
 /// cero significa que no surte ninguno.
 /// </param>
+/// <param name="Activo">
+/// <c>false</c> si esta retirado: no se ofrece al crear una orden, pero
+/// conserva sus ordenes historicas y su lista de precios.
+/// </param>
 public sealed record ProveedorDto(
     int Id,
     string Nombre,
     string? Contacto,
     string Telefono,
-    int? ProductosQueSurte = null);
+    int? ProductosQueSurte = null,
+    bool Activo = true);

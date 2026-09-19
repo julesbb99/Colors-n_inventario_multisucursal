@@ -37,6 +37,21 @@ public static class PoliticasAutorizacion
     public const string Supervision = "supervision";
 
     /// <summary>
+    /// Decisiones de alcance de RED, no de sede: dar de alta un proveedor,
+    /// cambiar su lista de precios, retirarlo.
+    ///
+    /// Solo Administrador General. El motivo no es jerarquia por si misma: el
+    /// catalogo de proveedores y sus precios son COMPARTIDOS por las tres sedes,
+    /// asi que un cambio ahi lo hereda todo el mundo. Un gerente responde por su
+    /// sede, y esto se le escapa del alcance: si pudiera retocar el precio de
+    /// referencia, estaria moviendo el criterio con el que compran las otras dos.
+    ///
+    /// Notese que esto NO es supervision con un rol menos. Es otro eje: aqui no
+    /// hay sede sobre la que comprobar nada, porque el dato no es de ninguna.
+    /// </summary>
+    public const string SoloAdminGeneral = "solo-admin-general";
+
+    /// <summary>
     /// Registra las politicas. Se llama desde el arranque, junto a
     /// <c>AddAuthorization</c>.
     /// </summary>
@@ -48,6 +63,10 @@ public static class PoliticasAutorizacion
         opciones.AddPolicy(Supervision, politica => politica
             .RequireAuthenticatedUser()
             .RequireRole(RolesColorsin.Supervision));
+
+        opciones.AddPolicy(SoloAdminGeneral, politica => politica
+            .RequireAuthenticatedUser()
+            .RequireRole(RolesColorsin.AdminGeneral));
 
         return opciones;
     }

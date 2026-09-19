@@ -74,15 +74,31 @@ function leerRetryAfter(error: AxiosError): number | null {
 axiosInstance.interceptors.response.use(
   (respuesta) => respuesta,
   (error: AxiosError<ProblemDetails>): Promise<never> => {
-    // La peticion no llego a salir: no hay red, la API esta apagada o se agoto
-    // el tiempo. Es el fallo que mas confunde en desarrollo, asi que el mensaje
-    // dice donde mirar.
+    // La peticion no obtuvo respuesta. Caben tres causas y el navegador NO
+    // ayuda a distinguirlas: por seguridad, un rechazo por CORS le llega al
+    // codigo igual que una conexion rechazada, sin detalle.
+    //
+    // Por eso el mensaje las ORDENA POR PROBABILIDAD en vez de enumerarlas como
+    // iguales. En desarrollo, casi siempre es que la API no esta corriendo; una
+    // version anterior mencionaba CORS al mismo nivel y mandaba a revisar la
+    // configuracion del servidor cuando lo unico que pasaba era que nadie la
+    // habia levantado.
     if (!error.response) {
+      // Un tiempo agotado SI distingue: significa que alguien contesto a la
+      // conexion y despues se quedo colgado. Ahi la API esta arriba y el
+      // problema es otro -una consulta lenta, la base sin responder-, asi que
+      // mandar a revisar si esta levantada seria mandar al sitio equivocado.
+      const agotoTiempo = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT';
+
       const fallo: ApiError = {
         estado: 0,
-        mensaje:
-          'No se pudo contactar la API. Verifica que esté levantada en ' +
-          `${import.meta.env.VITE_API_URL} y que el origen esté permitido en CORS.`,
+        mensaje: agotoTiempo
+          ? 'La API tardó demasiado en responder. Está levantada, pero la petición se quedó ' +
+            'esperando: revisa que MySQL esté arriba y que la consulta no se haya bloqueado.'
+          : 'La API no respondió. Lo más probable es que no esté levantada en ' +
+            `${import.meta.env.VITE_API_URL}: arráncala con "dotnet run" desde ` +
+            'back/colorsin.Api. Si ya está corriendo, entonces sí revisa que el origen de ' +
+            'esta página esté en su lista de CORS.',
         esPermisos: false,
         reintentarEnSegundos: null,
       };

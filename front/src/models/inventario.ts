@@ -31,8 +31,73 @@ export interface ExistenciaDto {
   cantidadBase: number;
   stockMinimo: number;
   costoPromedio: number;
-  /** Criterio de la API: `cantidadBase <= stockMinimo`. */
+  /**
+   * Criterio de la API: `cantidadBase <= stockMinimo`, Y ADEMÁS activa.
+   * Una existencia deshabilitada nunca alerta, por bajo que esté su saldo.
+   */
   enAlerta: boolean;
+  /**
+   * `false` si está dada de baja lógica: la sede dejó de manejar el producto.
+   *
+   * NO es lo mismo que saldo cero. Cero significa "se maneja y se agotó";
+   * inactiva significa "esta sede ya no lo maneja". La fila sigue en la base con
+   * su saldo, sus lotes y su historia: nada se borra.
+   */
+  activo: boolean;
+}
+
+/**
+ * Alta de una existencia. SIN CANTIDAD, igual que la API.
+ *
+ * El saldo solo se mueve por el libro mayor, donde cada asiento dice de dónde
+ * salió la mercancía. Nace en cero y se llena con un ingreso, una recepción de
+ * compra o un traslado.
+ */
+export interface CrearExistenciaDto {
+  sucursalId: number;
+  productoId: number;
+  stockMinimo: number;
+}
+
+/** Edición: solo el mínimo. La cantidad y el costo no se digitan. */
+export interface ActualizarExistenciaDto {
+  stockMinimo: number;
+}
+
+/** Los estados de un saldo. Son EXCLUYENTES: una fila está en uno solo. */
+export type EstadoExistencia = 'deshabilitado' | 'agotado' | 'alerta' | 'conSaldo';
+
+/**
+ * El estado de un saldo, en un solo sitio.
+ *
+ * OJO CON `enAlerta`: el criterio de la API es `cantidadBase <= stockMinimo`, y
+ * un saldo en CERO también lo cumple. Es correcto por parte del servidor -no hay
+ * nada, desde luego que falta stock- pero para la pantalla no vale: un producto
+ * agotado saldría a la vez en "En alerta" y en "Agotadas", contado dos veces y
+ * listado dos veces, que fue justo lo que se vio en producción.
+ *
+ * Por eso "alerta" aquí significa BAJO PERO CON SALDO, y el orden de las
+ * comprobaciones es el que lo garantiza: agotado primero.
+ *
+ * Y "deshabilitado" va ANTES que todo lo demás: una fila dada de baja se
+ * describe por eso y no por su saldo. Mostrarla como "agotada" invitaría a
+ * reponer un producto que la sede decidió dejar de manejar.
+ *
+ * Vive en el modelo y no en la tabla a propósito: la insignia ya distinguía los
+ * dos casos, pero las pestañas contaban con otro criterio. Con una sola función
+ * no pueden volver a discrepar.
+ */
+export function estadoExistencia(fila: ExistenciaDto): EstadoExistencia {
+  if (!fila.activo) {
+    return 'deshabilitado';
+  }
+  if (fila.cantidadBase <= 0) {
+    return 'agotado';
+  }
+  if (fila.enAlerta) {
+    return 'alerta';
+  }
+  return 'conSaldo';
 }
 
 /**

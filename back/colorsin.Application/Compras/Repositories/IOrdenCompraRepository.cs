@@ -51,6 +51,39 @@ public interface IOrdenCompraRepository
     /// </summary>
     void ActualizarCantidadRecibida(OrdenCompraDetalle detalle, decimal cantidadRecibida);
 
+    /// <summary>
+    /// La orden con sus lineas, CON SEGUIMIENTO, para editarla o retirarla.
+    ///
+    /// Distinta de <see cref="ObtenerParaRecibirAsync"/>: aquella bloquea la
+    /// fila porque la recepcion mueve stock y compite con otras recepciones.
+    /// Editar un borrador no mueve nada, asi que no hace falta el bloqueo.
+    /// </summary>
+    Task<OrdenCompra?> ObtenerParaEditarAsync(int id, CancellationToken cancellationToken = default);
+
+    /// <summary>Quita lineas de una orden. Solo al reemplazar las de un borrador.</summary>
+    void QuitarDetalles(IEnumerable<OrdenCompraDetalle> detalles);
+
+    /// <summary>Anade una linea a una orden existente.</summary>
+    void AgregarDetalle(OrdenCompraDetalle detalle);
+
+    /// <summary>
+    /// La ULTIMA linea con precio de ese producto a ese proveedor, mirando el
+    /// historico de ordenes de toda la red.
+    ///
+    /// DE TODA LA RED y no solo de la sede de quien pregunta: lo que cobra un
+    /// proveedor no depende de a que bodega entrega, y acotarlo por sede
+    /// esconderia el dato justo a la sede que aun no le ha comprado, que es la
+    /// que mas lo necesita.
+    ///
+    /// Se descartan las lineas SIN precio -no informan de nada- y las de ordenes
+    /// canceladas, porque un precio que nunca llego a ejecutarse no dice lo que
+    /// se paga.
+    /// </summary>
+    Task<OrdenCompraDetalle?> ObtenerUltimaLineaConPrecioAsync(
+        int productoId,
+        int proveedorId,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Confirma en la base todo lo preparado.</summary>
     Task<int> GuardarCambiosAsync(CancellationToken cancellationToken = default);
 }

@@ -36,6 +36,7 @@ public sealed class ComprasService : IComprasService
     private readonly IOrdenCompraRepository _ordenes;
     private readonly IProveedorRepository _proveedores;
     private readonly IInventarioRepository _inventario;
+    private readonly IProductoRepository _productos;
     private readonly IUnidadMedidaService _unidades;
     private readonly IAuditoriaService _auditoria;
 
@@ -43,9 +44,11 @@ public sealed class ComprasService : IComprasService
         IOrdenCompraRepository ordenes,
         IProveedorRepository proveedores,
         IInventarioRepository inventario,
+        IProductoRepository productos,
         IUnidadMedidaService unidades,
         IAuditoriaService auditoria)
     {
+        _productos = productos;
         _ordenes = ordenes;
         _proveedores = proveedores;
         _inventario = inventario;
@@ -58,9 +61,12 @@ public sealed class ComprasService : IComprasService
     // =========================================================================
 
     public async Task<IReadOnlyList<ProveedorDto>> ObtenerProveedoresAsync(
+        bool incluirInactivos,
         CancellationToken cancellationToken = default)
     {
-        var proveedores = await _proveedores.ObtenerTodosAsync(cancellationToken);
+        var proveedores = await _proveedores.ObtenerTodosAsync(
+            incluirInactivos, cancellationToken);
+
         return proveedores.Select(p => p.ToDto(contarProductos: true)).ToList();
     }
 
@@ -101,6 +107,74 @@ public sealed class ComprasService : IComprasService
         CrearOrdenCompraDto peticion,
         int usuarioId,
         CancellationToken cancellationToken = default)
+    {
+        // --- 1 y 2. Forma y proveedor -------------------------------------------
+        // Compartidas con ActualizarOrdenAsync: si estuvieran duplicadas, editar
+        // una orden acabaria admitiendo lo que crearla rechaza.
+        if (await ValidarOrdenAsync(peticion, usuarioId, cancellationToken) is { } rechazo)
+        {
+            return rechazo;
+        }
+
+        // --- 3. Crear, siempre en Pendiente -------------------------------------
+        var orden = new OrdenCompra
+        {
+            ProveedorId = peticion.ProveedorId,
+            SucursalId = peticion.SucursalId,
+            UsuarioId = usuarioId,
+            // El estado NO lo elige quien llama: una orden recien creada no
+            // puede nacer 'Recibida' y saltarse el ingreso al stock.
+            Estado = EstadoOrdenCompra.Pendiente,
+            PlazoPagoDias = peticion.PlazoPagoDias
+            // Fecha la pone la base con CURRENT_TIMESTAMP.
+        };
+
+        foreach (var linea in peticion.Lineas)
+        {
+            orden.Detalles.Add(new OrdenCompraDetalle
+            {
+                ProductoId = linea.ProductoId,
+                Cantidad = linea.Cantidad,
+                // Nada recibido todavia: el stock no se mueve al crear la orden.
+                CantidadRecibida = 0m,
+                UnidadId = linea.UnidadId,
+                PrecioUnitario = linea.PrecioUnitario,
+                Descuento = linea.Descuento
+            });
+        }
+
+        // Encabezado, lineas y auditoria en una transaccion: una orden a medias
+        // no sirve para nada.
+        return await _inventario.EjecutarEnTransaccionAsync(async ct =>
+        {
+            _ordenes.AgregarOrden(orden);
+            await _ordenes.GuardarCambiosAsync(ct);
+
+            var total = orden.ToDto().Total;
+
+            await _auditoria.RegistrarEventoAsync(
+                Modulo,
+                "CrearOrdenCompra",
+                usuarioId,
+                $"orden={orden.Id} | proveedor={peticion.ProveedorId} | " +
+                $"sucursal={peticion.SucursalId} | lineas={peticion.Lineas.Count} | " +
+                $"total={Num(total)} | estado=Pendiente",
+                ct);
+
+            await _ordenes.GuardarCambiosAsync(ct);
+
+            return ResultadoOrdenCompra.Ok(orden.Id, total);
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Validaciones comunes al alta y a la edicion de una orden. Devuelve el
+    /// rechazo, o <c>null</c> si todo esta bien.
+    /// </summary>
+    private async Task<ResultadoOrdenCompra?> ValidarOrdenAsync(
+        CrearOrdenCompraDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken)
     {
         // --- 1. Validaciones de forma ------------------------------------------
         if (peticion.Lineas is null || peticion.Lineas.Count == 0)
@@ -166,55 +240,7 @@ public sealed class ComprasService : IComprasService
                 $"No existe el proveedor {peticion.ProveedorId}.");
         }
 
-        // --- 3. Crear, siempre en Pendiente -------------------------------------
-        var orden = new OrdenCompra
-        {
-            ProveedorId = peticion.ProveedorId,
-            SucursalId = peticion.SucursalId,
-            UsuarioId = usuarioId,
-            // El estado NO lo elige quien llama: una orden recien creada no
-            // puede nacer 'Recibida' y saltarse el ingreso al stock.
-            Estado = EstadoOrdenCompra.Pendiente,
-            PlazoPagoDias = peticion.PlazoPagoDias
-            // Fecha la pone la base con CURRENT_TIMESTAMP.
-        };
-
-        foreach (var linea in peticion.Lineas)
-        {
-            orden.Detalles.Add(new OrdenCompraDetalle
-            {
-                ProductoId = linea.ProductoId,
-                Cantidad = linea.Cantidad,
-                // Nada recibido todavia: el stock no se mueve al crear la orden.
-                CantidadRecibida = 0m,
-                UnidadId = linea.UnidadId,
-                PrecioUnitario = linea.PrecioUnitario,
-                Descuento = linea.Descuento
-            });
-        }
-
-        // Encabezado, lineas y auditoria en una transaccion: una orden a medias
-        // no sirve para nada.
-        return await _inventario.EjecutarEnTransaccionAsync(async ct =>
-        {
-            _ordenes.AgregarOrden(orden);
-            await _ordenes.GuardarCambiosAsync(ct);
-
-            var total = orden.ToDto().Total;
-
-            await _auditoria.RegistrarEventoAsync(
-                Modulo,
-                "CrearOrdenCompra",
-                usuarioId,
-                $"orden={orden.Id} | proveedor={peticion.ProveedorId} | " +
-                $"sucursal={peticion.SucursalId} | lineas={peticion.Lineas.Count} | " +
-                $"total={Num(total)} | estado=Pendiente",
-                ct);
-
-            await _ordenes.GuardarCambiosAsync(ct);
-
-            return ResultadoOrdenCompra.Ok(orden.Id, total);
-        }, cancellationToken);
+        return null;
     }
 
     // =========================================================================
@@ -718,6 +744,436 @@ public sealed class ComprasService : IComprasService
         }
 
         return detalle;
+    }
+
+    // =========================================================================
+    // EDICION Y RETIRO DE ORDENES: solo mientras sean un borrador
+    // =========================================================================
+
+    public async Task<ResultadoOrdenCompra> ActualizarOrdenAsync(
+        int id,
+        CrearOrdenCompraDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        if (await ValidarOrdenAsync(peticion, usuarioId, cancellationToken) is { } rechazo)
+        {
+            return rechazo;
+        }
+
+        var orden = await _ordenes.ObtenerParaEditarAsync(id, cancellationToken);
+        if (orden is null)
+        {
+            return ResultadoOrdenCompra.Fallo(
+                ErrorCompra.OrdenNoEncontrada,
+                $"No existe la orden {id}.");
+        }
+
+        if (orden.Estado != EstadoOrdenCompra.Pendiente)
+        {
+            return ResultadoOrdenCompra.Fallo(
+                ErrorCompra.EstadoNoPermiteEdicion,
+                $"La orden {id} esta en estado '{orden.Estado}' y ya no se puede editar. " +
+                "Solo se modifica mientras siga Pendiente: a partir de ahi hay un compromiso " +
+                "con el proveedor y, si entro mercancia, movimientos en el libro mayor que " +
+                "citan esta orden.");
+        }
+
+        var antes = orden.ToDto().Total;
+
+        return await _inventario.EjecutarEnTransaccionAsync(async ct =>
+        {
+            orden.ProveedorId = peticion.ProveedorId;
+            orden.PlazoPagoDias = peticion.PlazoPagoDias;
+
+            // REEMPLAZO COMPLETO de las lineas. Se borran y se vuelven a crear en
+            // vez de intentar casarlas una a una: las lineas de un borrador no
+            // tienen identidad estable -nadie las ha citado todavia- y el
+            // emparejamiento por posicion daria cambios silenciosos en cuanto
+            // alguien inserte una linea en medio.
+            //
+            // Es seguro porque la orden esta Pendiente: CantidadRecibida es cero
+            // en todas, asi que no se pierde ningun dato de recepcion.
+            _ordenes.QuitarDetalles(orden.Detalles.ToList());
+            orden.Detalles.Clear();
+
+            foreach (var linea in peticion.Lineas)
+            {
+                _ordenes.AgregarDetalle(new OrdenCompraDetalle
+                {
+                    OrdenCompraId = orden.Id,
+                    ProductoId = linea.ProductoId,
+                    Cantidad = linea.Cantidad,
+                    CantidadRecibida = 0m,
+                    UnidadId = linea.UnidadId,
+                    PrecioUnitario = linea.PrecioUnitario,
+                    Descuento = linea.Descuento
+                });
+            }
+
+            await _ordenes.GuardarCambiosAsync(ct);
+
+            // Se relee para calcular el total con las lineas ya guardadas: la
+            // coleccion en memoria se acaba de vaciar y rellenar por separado.
+            var guardada = await _ordenes.ObtenerPorIdAsync(orden.Id, ct);
+            var total = guardada?.ToDto().Total ?? 0m;
+
+            await _auditoria.RegistrarEventoAsync(
+                Modulo,
+                "ActualizarOrdenCompra",
+                usuarioId,
+                $"orden={orden.Id} | proveedor={peticion.ProveedorId} | " +
+                $"lineas={peticion.Lineas.Count} | total={Num(antes)} -> {Num(total)}",
+                ct);
+
+            await _ordenes.GuardarCambiosAsync(ct);
+
+            return new ResultadoOrdenCompra(
+                true, ErrorCompra.Ninguno, "Orden actualizada.", orden.Id, total);
+        }, cancellationToken);
+    }
+
+    public async Task<ResultadoOrdenCompra> CancelarOrdenAsync(
+        int id,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        var orden = await _ordenes.ObtenerParaEditarAsync(id, cancellationToken);
+        if (orden is null)
+        {
+            return ResultadoOrdenCompra.Fallo(
+                ErrorCompra.OrdenNoEncontrada,
+                $"No existe la orden {id}.");
+        }
+
+        if (orden.Estado != EstadoOrdenCompra.Pendiente)
+        {
+            var explicacion = orden.Estado is EstadoOrdenCompra.Cancelada
+                ? "Esa orden ya estaba cancelada."
+                : $"La orden {id} esta en estado '{orden.Estado}' y ya no se puede retirar. " +
+                  "Una vez confirmada o recibida, la orden es el documento que respalda lo que " +
+                  "entro a la bodega.";
+
+            return ResultadoOrdenCompra.Fallo(ErrorCompra.EstadoNoPermiteEdicion, explicacion);
+        }
+
+        var total = orden.ToDto().Total;
+
+        return await _inventario.EjecutarEnTransaccionAsync(async ct =>
+        {
+            _ordenes.ActualizarEstado(orden, EstadoOrdenCompra.Cancelada);
+
+            await _auditoria.RegistrarEventoAsync(
+                Modulo,
+                "CancelarOrdenCompra",
+                usuarioId,
+                $"orden={orden.Id} | proveedor={orden.ProveedorId} | " +
+                $"sucursal={orden.SucursalId} | total={Num(total)} | Pendiente -> Cancelada",
+                ct);
+
+            await _ordenes.GuardarCambiosAsync(ct);
+
+            return new ResultadoOrdenCompra(
+                true,
+                ErrorCompra.Ninguno,
+                "Orden cancelada. No se borro: queda registrada como Cancelada con su detalle.",
+                orden.Id,
+                total);
+        }, cancellationToken);
+    }
+
+    // =========================================================================
+    // PRECIOS DE REFERENCIA
+    // =========================================================================
+
+    public async Task<PrecioReferenciaDto?> ObtenerPrecioReferenciaAsync(
+        int productoId,
+        int proveedorId,
+        CancellationToken cancellationToken = default)
+    {
+        var producto = await _productos.ObtenerPorIdAsync(productoId, cancellationToken);
+        if (producto is null)
+        {
+            return null;
+        }
+
+        var proveedor = await _proveedores.ObtenerPorIdAsync(proveedorId, cancellationToken);
+        if (proveedor is null)
+        {
+            return null;
+        }
+
+        var precio = await _proveedores.ObtenerPrecioAsync(
+            productoId, proveedorId, cancellationToken);
+
+        var ultima = await _ordenes.ObtenerUltimaLineaConPrecioAsync(
+            productoId, proveedorId, cancellationToken);
+
+        return new PrecioReferenciaDto(
+            producto.Id,
+            producto.Nombre,
+            proveedor.Id,
+            proveedor.Nombre,
+            producto.UnidadBase?.Simbolo,
+            precio?.PrecioReferencia,
+            ultima is null
+                ? null
+                : new UltimaCompraDto(
+                    ultima.OrdenCompraId,
+                    ultima.OrdenCompra.Fecha ?? default,
+                    ultima.Cantidad,
+                    ultima.UnidadId,
+                    ultima.Unidad?.Simbolo,
+                    ultima.PrecioUnitario,
+                    ultima.Descuento,
+                    ultima.OrdenCompra.Estado?.ToString() ?? string.Empty));
+    }
+
+    // =========================================================================
+    // PROVEEDORES
+    // =========================================================================
+
+    public async Task<ResultadoProveedor> CrearProveedorAsync(
+        GuardarProveedorDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        var nombre = peticion.Nombre?.Trim() ?? string.Empty;
+        var telefono = peticion.Telefono?.Trim() ?? string.Empty;
+
+        if (nombre.Length == 0 || telefono.Length == 0)
+        {
+            return ResultadoProveedor.Fallo(
+                ErrorCompra.DatosProveedorIncompletos,
+                "El nombre y el telefono del proveedor son obligatorios.");
+        }
+
+        if (await _proveedores.ExisteNombreAsync(nombre, null, cancellationToken))
+        {
+            return ResultadoProveedor.Fallo(
+                ErrorCompra.ProveedorDuplicado,
+                $"Ya hay un proveedor llamado '{nombre}'. Si esta retirado, reactivalo en vez " +
+                "de crear otro: asi conserva su lista de precios y su historial de ordenes.");
+        }
+
+        var proveedor = new Proveedor
+        {
+            Nombre = nombre,
+            Contacto = string.IsNullOrWhiteSpace(peticion.Contacto)
+                ? null
+                : peticion.Contacto.Trim(),
+            Telefono = telefono,
+            Activo = true
+        };
+
+        _proveedores.Agregar(proveedor);
+        await _proveedores.GuardarCambiosAsync(cancellationToken);
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo,
+            "CrearProveedor",
+            usuarioId,
+            $"proveedor={proveedor.Id} ('{nombre}') | telefono={telefono}",
+            cancellationToken);
+
+        await _proveedores.GuardarCambiosAsync(cancellationToken);
+
+        return ResultadoProveedor.Ok(
+            proveedor.ToDto(contarProductos: true), $"Proveedor '{nombre}' creado.");
+    }
+
+    public async Task<ResultadoProveedor> ActualizarProveedorAsync(
+        int id,
+        GuardarProveedorDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        var nombre = peticion.Nombre?.Trim() ?? string.Empty;
+        var telefono = peticion.Telefono?.Trim() ?? string.Empty;
+
+        if (nombre.Length == 0 || telefono.Length == 0)
+        {
+            return ResultadoProveedor.Fallo(
+                ErrorCompra.DatosProveedorIncompletos,
+                "El nombre y el telefono del proveedor son obligatorios.");
+        }
+
+        var proveedor = await _proveedores.ObtenerParaEditarAsync(id, cancellationToken);
+        if (proveedor is null)
+        {
+            return ResultadoProveedor.Fallo(
+                ErrorCompra.ProveedorNoEncontrado,
+                $"No existe el proveedor {id}.");
+        }
+
+        // `excluyendoId` es lo que permite guardar sin cambiar el nombre: sin el,
+        // el proveedor chocaria consigo mismo.
+        if (await _proveedores.ExisteNombreAsync(nombre, id, cancellationToken))
+        {
+            return ResultadoProveedor.Fallo(
+                ErrorCompra.ProveedorDuplicado,
+                $"Ya hay otro proveedor llamado '{nombre}'.");
+        }
+
+        var antes = $"'{proveedor.Nombre}' contacto='{proveedor.Contacto}' tel={proveedor.Telefono}";
+
+        proveedor.Nombre = nombre;
+        proveedor.Contacto = string.IsNullOrWhiteSpace(peticion.Contacto)
+            ? null
+            : peticion.Contacto.Trim();
+        proveedor.Telefono = telefono;
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo,
+            "ActualizarProveedor",
+            usuarioId,
+            $"proveedor={id} | {antes} -> '{nombre}' contacto='{proveedor.Contacto}' tel={telefono}",
+            cancellationToken);
+
+        await _proveedores.GuardarCambiosAsync(cancellationToken);
+
+        return ResultadoProveedor.Ok(
+            proveedor.ToDto(contarProductos: true), "Proveedor actualizado.");
+    }
+
+    public Task<ResultadoProveedor> DesactivarProveedorAsync(
+        int id,
+        int usuarioId,
+        CancellationToken cancellationToken = default) =>
+        CambiarEstadoProveedorAsync(id, activo: false, usuarioId, cancellationToken);
+
+    public Task<ResultadoProveedor> ReactivarProveedorAsync(
+        int id,
+        int usuarioId,
+        CancellationToken cancellationToken = default) =>
+        CambiarEstadoProveedorAsync(id, activo: true, usuarioId, cancellationToken);
+
+    private async Task<ResultadoProveedor> CambiarEstadoProveedorAsync(
+        int id,
+        bool activo,
+        int usuarioId,
+        CancellationToken cancellationToken)
+    {
+        var proveedor = await _proveedores.ObtenerParaEditarAsync(id, cancellationToken);
+        if (proveedor is null)
+        {
+            return ResultadoProveedor.Fallo(
+                ErrorCompra.ProveedorNoEncontrado,
+                $"No existe el proveedor {id}.");
+        }
+
+        if (proveedor.Activo == activo)
+        {
+            return ResultadoProveedor.Fallo(
+                ErrorCompra.ProveedorEstadoSinCambio,
+                activo
+                    ? "Ese proveedor ya estaba activo."
+                    : "Ese proveedor ya estaba retirado.");
+        }
+
+        proveedor.Activo = activo;
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo,
+            activo ? "ReactivarProveedor" : "DesactivarProveedor",
+            usuarioId,
+            $"proveedor={id} ('{proveedor.Nombre}')",
+            cancellationToken);
+
+        await _proveedores.GuardarCambiosAsync(cancellationToken);
+
+        return ResultadoProveedor.Ok(
+            proveedor.ToDto(contarProductos: true),
+            activo
+                ? $"'{proveedor.Nombre}' vuelve al catalogo."
+                : $"'{proveedor.Nombre}' queda retirado. Sus ordenes y su lista de precios " +
+                  "siguen intactas; solo deja de ofrecerse en ordenes nuevas.");
+    }
+
+    public async Task<ResultadoProveedor> GuardarPrecioReferenciaAsync(
+        int proveedorId,
+        int productoId,
+        GuardarPrecioReferenciaDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        if (peticion.PrecioReferencia is < 0m)
+        {
+            return ResultadoProveedor.Fallo(
+                ErrorCompra.PrecioInvalido,
+                "El precio de referencia no puede ser negativo.");
+        }
+
+        var proveedor = await _proveedores.ObtenerParaEditarAsync(proveedorId, cancellationToken);
+        if (proveedor is null)
+        {
+            return ResultadoProveedor.Fallo(
+                ErrorCompra.ProveedorNoEncontrado,
+                $"No existe el proveedor {proveedorId}.");
+        }
+
+        var producto = await _productos.ObtenerPorIdAsync(productoId, cancellationToken);
+        if (producto is null)
+        {
+            return ResultadoProveedor.Fallo(
+                ErrorCompra.ProductoNoEncontrado,
+                $"No existe el producto {productoId}.");
+        }
+
+        var precio = await _proveedores.ObtenerPrecioAsync(
+            productoId, proveedorId, cancellationToken);
+
+        string detalle;
+
+        if (peticion.PrecioReferencia is null)
+        {
+            if (precio is null)
+            {
+                return ResultadoProveedor.Fallo(
+                    ErrorCompra.PrecioNoEncontrado,
+                    $"'{producto.Nombre}' no estaba en la lista de '{proveedor.Nombre}'.");
+            }
+
+            // Quitar la entrada NO toca ninguna orden: las lineas historicas
+            // guardan su propio precio, no una referencia a esta tabla.
+            _proveedores.QuitarPrecio(precio);
+            detalle = $"producto={productoId} ('{producto.Nombre}') | precio retirado de la lista";
+        }
+        else if (precio is null)
+        {
+            _proveedores.AgregarPrecio(new ProductoProveedor
+            {
+                ProductoId = productoId,
+                ProveedorId = proveedorId,
+                PrecioReferencia = peticion.PrecioReferencia
+            });
+            detalle = $"producto={productoId} ('{producto.Nombre}') | " +
+                      $"precio nuevo={Num(peticion.PrecioReferencia.Value)}";
+        }
+        else
+        {
+            var anterior = precio.PrecioReferencia;
+            precio.PrecioReferencia = peticion.PrecioReferencia;
+            detalle = $"producto={productoId} ('{producto.Nombre}') | precio=" +
+                      $"{(anterior is null ? "sin precio" : Num(anterior.Value))} -> " +
+                      $"{Num(peticion.PrecioReferencia.Value)}";
+        }
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo,
+            "GuardarPrecioReferencia",
+            usuarioId,
+            $"proveedor={proveedorId} ('{proveedor.Nombre}') | {detalle} | " +
+            $"unidad base={producto.UnidadBase?.Simbolo}",
+            cancellationToken);
+
+        await _proveedores.GuardarCambiosAsync(cancellationToken);
+
+        var recargado = await _proveedores.ObtenerPorIdAsync(proveedorId, cancellationToken);
+
+        return ResultadoProveedor.Ok(
+            (recargado ?? proveedor).ToDto(contarProductos: true),
+            "Lista de precios actualizada.");
     }
 
     /// <summary>

@@ -7,7 +7,13 @@ namespace Colorsin.Application.Compras.Services;
 public interface IComprasService
 {
     /// <summary>Proveedores del catalogo, con el conteo de productos que surte cada uno.</summary>
+    /// <param name="incluirInactivos">
+    /// <c>false</c> por defecto: los retirados no salen, porque quien crea una
+    /// orden no debe poder elegirlos. En <c>true</c> los incluye, para la
+    /// pantalla de administracion desde la que se reactivan.
+    /// </param>
     Task<IReadOnlyList<ProveedorDto>> ObtenerProveedoresAsync(
+        bool incluirInactivos,
         CancellationToken cancellationToken = default);
 
     /// <summary>El proveedor con ese id, o <c>null</c> si no existe.</summary>
@@ -73,6 +79,109 @@ public interface IComprasService
     /// </param>
     Task<ResultadoRecepcion> ConfirmarRecepcionAsync(
         ConfirmarRecepcionDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
+    // =========================================================================
+    // EDICION Y RETIRO DE ORDENES
+    //
+    // LAS DOS SOLO VALEN EN 'Pendiente'. Una orden deja de ser un borrador en
+    // cuanto se confirma o entra mercancia: a partir de ahi hay un compromiso
+    // con el proveedor y, si hubo recepcion, stock movido y asientos en el libro
+    // mayor que la citan. Cambiarla entonces seria reescribir el papel con el
+    // que se recibio.
+    //
+    // LA AUTORIZACION NO ESTA AQUI: la sede la comprueba el endpoint, como en el
+    // resto del modulo.
+    // =========================================================================
+
+    /// <summary>
+    /// Reemplaza el contenido de una orden en 'Pendiente': proveedor, plazo y
+    /// lineas. La sede NO se cambia -mover una orden de bodega es otra orden- ni
+    /// el usuario que la creo.
+    ///
+    /// Es un reemplazo completo, no un parche: las lineas que llegan sustituyen
+    /// a las que habia. Es lo que corresponde a un PUT y lo que evita tener que
+    /// inventar identidades estables para lineas que aun no existen en ningun
+    /// papel.
+    /// </summary>
+    Task<ResultadoOrdenCompra> ActualizarOrdenAsync(
+        int id,
+        CrearOrdenCompraDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Retira una orden en 'Pendiente' pasandola a 'Cancelada'.
+    ///
+    /// NO LA BORRA. El estado 'Cancelada' ya existia en el esquema para esto, y
+    /// conservar la fila es lo que permite responder despues a "quien pidio esto
+    /// y por que no llego". La interfaz la esconde del listado del dia, que es
+    /// el efecto que se busca al retirarla.
+    /// </summary>
+    Task<ResultadoOrdenCompra> CancelarOrdenAsync(
+        int id,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
+    // =========================================================================
+    // PRECIOS DE REFERENCIA
+    // =========================================================================
+
+    /// <summary>
+    /// Lo que se sabe del precio de un producto con un proveedor: el de lista y
+    /// el de la ultima compra real. Ver <see cref="PrecioReferenciaDto"/>.
+    ///
+    /// Devuelve el DTO aunque no haya ni lista ni historico -con los dos campos
+    /// nulos- porque "no hay precio" es una respuesta legitima que la pantalla
+    /// tiene que poder mostrar. Solo da <c>null</c> si el producto o el
+    /// proveedor no existen.
+    /// </summary>
+    Task<PrecioReferenciaDto?> ObtenerPrecioReferenciaAsync(
+        int productoId,
+        int proveedorId,
+        CancellationToken cancellationToken = default);
+
+    // =========================================================================
+    // PROVEEDORES: alta, edicion y retiro. Solo Administrador General.
+    // =========================================================================
+
+    /// <summary>Da de alta un proveedor. El nombre es unico.</summary>
+    Task<ResultadoProveedor> CrearProveedorAsync(
+        GuardarProveedorDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Cambia nombre, contacto o telefono.</summary>
+    Task<ResultadoProveedor> ActualizarProveedorAsync(
+        int id,
+        GuardarProveedorDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Baja logica: deja de ofrecerse en ordenes nuevas. Conserva sus ordenes
+    /// historicas y su lista de precios. Ver la migracion 13.
+    /// </summary>
+    Task<ResultadoProveedor> DesactivarProveedorAsync(
+        int id,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Deshace el retiro.</summary>
+    Task<ResultadoProveedor> ReactivarProveedorAsync(
+        int id,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Fija el precio de lista de un producto para un proveedor, en la UNIDAD
+    /// BASE del producto. Un precio nulo quita la entrada de la lista.
+    /// </summary>
+    Task<ResultadoProveedor> GuardarPrecioReferenciaAsync(
+        int proveedorId,
+        int productoId,
+        GuardarPrecioReferenciaDto peticion,
         int usuarioId,
         CancellationToken cancellationToken = default);
 }

@@ -20,6 +20,7 @@ public sealed class InventarioRepository : IInventarioRepository
 
     public async Task<IReadOnlyList<InventarioSucursal>> ObtenerExistenciasAsync(
         int? sucursalId = null,
+        bool incluirInactivas = false,
         CancellationToken cancellationToken = default)
     {
         var consulta = _db.InventarioSucursales
@@ -34,11 +35,31 @@ public sealed class InventarioRepository : IInventarioRepository
             consulta = consulta.Where(i => i.SucursalId == id);
         }
 
+        if (!incluirInactivas)
+        {
+            consulta = consulta.Where(i => i.Activo);
+        }
+
         return await consulta
-            .OrderBy(i => i.Sucursal.Nombre)
+            // Las activas primero cuando se piden las dos: una baja es la
+            // excepcion y no tiene por que mezclarse con el listado del dia.
+            .OrderByDescending(i => i.Activo)
+            .ThenBy(i => i.Sucursal.Nombre)
             .ThenBy(i => i.Producto.Nombre)
             .ToListAsync(cancellationToken);
     }
+
+    public Task<InventarioSucursal?> ObtenerExistenciaPorIdAsync(
+        int id,
+        CancellationToken cancellationToken = default) =>
+        _db.InventarioSucursales
+            // SIN AsNoTracking, a diferencia de las consultas de arriba: esta
+            // entidad se modifica y se guarda, y sin seguimiento los cambios se
+            // perderian en silencio al llamar a SaveChanges.
+            .Include(i => i.Sucursal)
+            .Include(i => i.Producto)
+                .ThenInclude(p => p.UnidadBase)
+            .FirstOrDefaultAsync(i => i.Id == id, cancellationToken);
 
     public Task<InventarioSucursal?> ObtenerSaldoAsync(
         int sucursalId,
@@ -156,7 +177,13 @@ public sealed class InventarioRepository : IInventarioRepository
                 .ThenInclude(p => p.UnidadBase)
             // El criterio de alerta. Va en la consulta y no en memoria para no
             // traer todo el inventario de la red y descartarlo aqui.
-            .Where(i => i.CantidadBase <= i.StockMinimo);
+            //
+            // `i.Activo` esta aqui y no como filtro aparte por lo mismo: avisar
+            // de reponer un producto que la sede dio de baja es ruido, y ademas
+            // InventarioSucursalDto.EnAlerta ya devuelve false para esas filas.
+            // Si esta consulta no lo excluyera, el tablero contaria alertas que
+            // la tabla de existencias pinta como normales.
+            .Where(i => i.Activo && i.CantidadBase <= i.StockMinimo);
 
         if (sucursalId is int id)
         {

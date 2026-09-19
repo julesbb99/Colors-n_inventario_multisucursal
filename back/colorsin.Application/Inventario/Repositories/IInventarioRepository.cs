@@ -20,8 +20,26 @@ public interface IInventarioRepository
     /// Existencias de una sede, o de toda la red si <paramref name="sucursalId"/>
     /// es nulo. Incluye producto, sede y unidad base.
     /// </summary>
+    /// <param name="incluirInactivas">
+    /// <c>false</c> por defecto: las dadas de baja no salen. Se pone en
+    /// <c>true</c> solo donde hay que verlas a proposito, que hoy es la pestana
+    /// de deshabilitadas -sin ella la baja seria irreversible desde la interfaz-
+    /// y la comprobacion previa a crear una existencia.
+    /// </param>
     Task<IReadOnlyList<InventarioSucursal>> ObtenerExistenciasAsync(
         int? sucursalId = null,
+        bool incluirInactivas = false,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Una existencia por su id, CON SEGUIMIENTO para poder modificarla, y con
+    /// sede, producto y unidad base cargados para rearmar el DTO sin releer.
+    ///
+    /// Devuelve tambien las inactivas: son justo las que hay que encontrar para
+    /// reactivarlas.
+    /// </summary>
+    Task<InventarioSucursal?> ObtenerExistenciaPorIdAsync(
+        int id,
         CancellationToken cancellationToken = default);
 
     /// <summary>Saldo de una pareja (sede, producto), o <c>null</c> si no hay fila.</summary>

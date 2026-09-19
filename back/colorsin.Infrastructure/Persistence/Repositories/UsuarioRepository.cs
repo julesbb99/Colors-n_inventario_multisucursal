@@ -57,6 +57,8 @@ public sealed class UsuarioRepository : IUsuarioRepository
             // indice unico uq_usuarios_email en vez de recorrer la tabla.
             .FirstOrDefaultAsync(u => u.Email == email, cancellationToken);
 
+    public void Agregar(Usuario usuario) => _db.Usuarios.Add(usuario);
+
     public Task<int> GuardarCambiosAsync(CancellationToken cancellationToken = default) =>
         _db.SaveChangesAsync(cancellationToken);
 }
