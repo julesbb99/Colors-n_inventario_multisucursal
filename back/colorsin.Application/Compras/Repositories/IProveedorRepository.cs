@@ -50,6 +50,15 @@ public interface IProveedorRepository
         int proveedorId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Todos los proveedores que tienen ese producto en su lista, con el
+    /// proveedor cargado para poder nombrarlo. Incluye los retirados: su precio
+    /// sigue siendo una referencia de lo que costaba.
+    /// </summary>
+    Task<IReadOnlyList<ProductoProveedor>> ObtenerPreciosDeProductoAsync(
+        int productoId,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Anade una pareja producto-proveedor a la lista de precios.</summary>
     void AgregarPrecio(ProductoProveedor precio);
 

@@ -72,6 +72,18 @@ public sealed class ProveedorRepository : IProveedorRepository
                 pp => pp.ProductoId == productoId && pp.ProveedorId == proveedorId,
                 cancellationToken);
 
+    public async Task<IReadOnlyList<ProductoProveedor>> ObtenerPreciosDeProductoAsync(
+        int productoId,
+        CancellationToken cancellationToken = default) =>
+        await _db.ProductoProveedores
+            .AsNoTracking()
+            .Include(pp => pp.Proveedor)
+            // Sin precio no informa de nada: la fila solo dice que ese proveedor
+            // surte el producto, no a cuanto.
+            .Where(pp => pp.ProductoId == productoId && pp.PrecioReferencia != null)
+            .OrderBy(pp => pp.PrecioReferencia)
+            .ToListAsync(cancellationToken);
+
     public void AgregarPrecio(ProductoProveedor precio) => _db.ProductoProveedores.Add(precio);
 
     public void QuitarPrecio(ProductoProveedor precio) => _db.ProductoProveedores.Remove(precio);

@@ -183,4 +183,24 @@ public interface IDashboardRepository
         int? sucursalId,
         int top,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lo que falta por llegar de las ordenes que se recibieron CORTAS y siguen
+    /// abiertas (estado 'ParcialmenteRecibida').
+    /// </summary>
+    Task<FaltanteRecepcion> ObtenerFaltanteRecepcionAsync(
+        int? sucursalId,
+        CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// El hueco entre lo pedido y lo recibido de las ordenes abiertas a medias.
+/// </summary>
+/// <param name="Ordenes">Cuantas ordenes estan en ese estado.</param>
+/// <param name="Valor">
+/// Lo que vale lo que falta, al precio pactado y con su descuento.
+///
+/// NO SE DESCUENTA DE NINGUN SALDO: esa mercancia nunca entro a la bodega, asi
+/// que no hay nada que restar. Es un dato de compras, no de inventario.
+/// </param>
+public readonly record struct FaltanteRecepcion(int Ordenes, decimal Valor);

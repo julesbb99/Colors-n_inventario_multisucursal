@@ -54,6 +54,26 @@ namespace Colorsin.Application.Dashboard.DTOs;
 /// Traslados despachados que todavia no se reciben (estado 'EnTransito'). Es
 /// mercancia que ya salio del origen y aun no suma en el destino.
 /// </param>
+/// <param name="OrdenesParcialmenteRecibidas">
+/// Cuantas ordenes de compra llegaron cortas y siguen esperando el resto
+/// (estado 'ParcialmenteRecibida').
+/// </param>
+/// <param name="FaltanteRecepcionValor">
+/// Lo que vale, en pesos, la mercancia que se pidio y todavia NO ha llegado de
+/// esas ordenes: por cada linea, lo que falta por recibir valorado al precio
+/// pactado y con su descuento.
+///
+/// NO ES UNA MERMA, Y LA DISTINCION IMPORTA. La merma es un movimiento de
+/// inventario: sale mercancia que estaba en la bodega y el saldo baja. Esto es
+/// lo contrario, mercancia que NUNCA entro, asi que no hay nada que descontar;
+/// anotarlo como merma dejaria el inventario por debajo de lo que hay
+/// fisicamente en el estante.
+///
+/// TAMPOCO ES UNA PERDIDA TODAVIA: la orden sigue abierta y el proveedor puede
+/// completar la entrega. Es lo que esta pendiente de llegar. El dia que se
+/// decida que ya no viene, hay que cerrar la orden, y esa operacion todavia no
+/// existe.
+/// </param>
 /// <param name="AlertasStockBajo">
 /// Cuantos saldos cumplen <c>cantidad_base &lt;= stock_minimo</c>, el mismo
 /// criterio de <c>IInventarioService.ObtenerAlertasStockBajoAsync</c>. Aqui va
@@ -94,4 +114,6 @@ public sealed record ResumenGeneralDto(
     int AlertasStockBajo,
     int AlertasVencimiento,
     int DiasUmbralVencimiento,
+    int OrdenesParcialmenteRecibidas,
+    decimal FaltanteRecepcionValor,
     DateTime GeneradoEn);

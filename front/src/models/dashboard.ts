@@ -26,5 +26,16 @@ export interface ResumenGeneralDto {
   alertasVencimiento: number;
   /** Ventana usada para `alertasVencimiento`. Sin ella el numero no se puede interpretar. */
   diasUmbralVencimiento: number;
+  /** Órdenes de compra que llegaron cortas y siguen esperando el resto. */
+  ordenesParcialmenteRecibidas: number;
+  /**
+   * Lo que vale lo que se pidió y todavía NO ha llegado de esas órdenes.
+   *
+   * NO ES UNA MERMA. La merma saca mercancía que estaba en la bodega y baja el
+   * saldo; esto es lo contrario, mercancía que nunca entró, así que no hay nada
+   * que descontar. Y tampoco es una pérdida todavía: la orden sigue abierta y
+   * el proveedor puede completar la entrega.
+   */
+  faltanteRecepcionValor: number;
   generadoEn: string;
 }

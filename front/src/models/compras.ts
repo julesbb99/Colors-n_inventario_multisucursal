@@ -72,6 +72,23 @@ export interface PrecioReferenciaDto {
   /** Nulo si ese proveedor no tiene el producto en su lista. No es cero. */
   precioReferencia: number | null;
   ultimaCompra: UltimaCompraDto | null;
+  /**
+   * Lo que ha costado el producto de media, por unidad base, según el inventario.
+   *
+   * ES EL ÚNICO QUE CASI SIEMPRE ESTÁ: los otros dos dependen de que exista un
+   * acuerdo con ESE proveedor o una compra previa a ESE proveedor.
+   */
+  costoPromedio: number | null;
+  /** Lo que el mismo producto tiene pactado con OTROS proveedores. */
+  otrosProveedores: PrecioDeOtroProveedorDto[];
+}
+
+export interface PrecioDeOtroProveedorDto {
+  proveedorId: number;
+  proveedorNombre: string;
+  /** `false` si está retirado: su precio sigue valiendo como referencia. */
+  activo: boolean;
+  precioReferencia: number;
 }
 
 export interface UltimaCompraDto {

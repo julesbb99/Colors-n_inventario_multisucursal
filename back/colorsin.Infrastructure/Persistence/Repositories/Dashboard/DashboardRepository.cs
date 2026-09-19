@@ -1,6 +1,7 @@
 using Colorsin.Application.Dashboard.DTOs;
 using Colorsin.Application.Dashboard.Repositories;
 using Colorsin.Application.Inventario.DTOs;
+using Colorsin.Domain.Compras;
 using Microsoft.EntityFrameworkCore;
 
 namespace Colorsin.Infrastructure.Persistence.Repositories.Dashboard;
@@ -625,6 +626,44 @@ public sealed class DashboardRepository : IDashboardRepository
             p => (Nombre: (string?)p.Nombre,
                   Categoria: p.Categoria,
                   UnidadBaseSimbolo: (string?)p.Simbolo));
+    }
+
+    public async Task<FaltanteRecepcion> ObtenerFaltanteRecepcionAsync(
+        int? sucursalId,
+        CancellationToken cancellationToken = default)
+    {
+        // Solo 'ParcialmenteRecibida'. Una orden Pendiente no ha recibido nada,
+        // asi que no "falto" nada: esta entera por llegar, que es otra cosa. El
+        // faltante nace justo cuando una entrega llega corta.
+        var consulta = _db.OrdenesCompra
+            .AsNoTracking()
+            .Where(o => o.Estado == EstadoOrdenCompra.ParcialmenteRecibida);
+
+        if (sucursalId is int id)
+        {
+            consulta = consulta.Where(o => o.SucursalId == id);
+        }
+
+        var ordenes = await consulta.CountAsync(cancellationToken);
+
+        // Se suma en el servidor, no trayendo las lineas: son todas las lineas
+        // abiertas de la red y solo hace falta un numero.
+        //
+        // `?? 0` en cantidad y precio porque las dos columnas admiten nulo. Una
+        // linea sin precio aporta cero al valor, que es lo correcto: no se sabe
+        // cuanto vale lo que falta, y suponerlo seria inventar la cifra.
+        var valor = await consulta
+            .SelectMany(o => o.Detalles)
+            .Select(d =>
+                ((d.Cantidad ?? 0m) - d.CantidadRecibida) *
+                (d.PrecioUnitario ?? 0m) *
+                (1m - d.Descuento / 100m))
+            .SumAsync(cancellationToken);
+
+        // Nunca negativo: si una linea quedara con mas recibido que pedido -lo
+        // impide un CHECK, pero el dato viene de la base- restaria del total y
+        // disimularia el faltante de otra.
+        return new FaltanteRecepcion(ordenes, Math.Max(0m, valor));
     }
 
     /// <summary>

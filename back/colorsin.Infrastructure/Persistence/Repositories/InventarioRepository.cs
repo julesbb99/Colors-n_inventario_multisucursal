@@ -61,6 +61,33 @@ public sealed class InventarioRepository : IInventarioRepository
                 .ThenInclude(p => p.UnidadBase)
             .FirstOrDefaultAsync(i => i.Id == id, cancellationToken);
 
+    public async Task<decimal?> ObtenerCostoPromedioAsync(
+        int productoId,
+        CancellationToken cancellationToken = default)
+    {
+        // Solo las filas con costo: una existencia recien creada tiene costo
+        // cero, y meterla en la media hundiria el promedio de un producto que en
+        // realidad si tiene un costo conocido en las otras sedes.
+        var filas = await _db.InventarioSucursales
+            .AsNoTracking()
+            .Where(i => i.ProductoId == productoId && i.Activo && i.CostoPromedio > 0m)
+            .Select(i => new { i.CantidadBase, i.CostoPromedio })
+            .ToListAsync(cancellationToken);
+
+        if (filas.Count == 0)
+        {
+            return null;
+        }
+
+        var cantidadTotal = filas.Sum(f => f.CantidadBase);
+
+        return cantidadTotal > 0m
+            ? filas.Sum(f => f.CantidadBase * f.CostoPromedio) / cantidadTotal
+            // Todo agotado: no hay con que ponderar, pero los costos siguen
+            // siendo validos. Media simple.
+            : filas.Average(f => f.CostoPromedio);
+    }
+
     public Task<InventarioSucursal?> ObtenerSaldoAsync(
         int sucursalId,
         int productoId,

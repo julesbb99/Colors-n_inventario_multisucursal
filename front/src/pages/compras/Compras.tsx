@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Building2, PackageCheck, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Building2, PackageCheck, Pencil, Plus, XCircle } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useSede } from '../../hooks/useSede';
 import { useConsulta } from '../../hooks/useConsulta';
@@ -28,11 +28,12 @@ const ESTADO_BADGE: Record<EstadoOrdenCompra, EstadoBadge> = {
   Cancelada: 'inactivo',
 };
 
-type Pestana = 'todas' | 'pendientes' | 'recibidas' | 'canceladas';
+type Pestana = 'todas' | 'pendientes' | 'parciales' | 'recibidas' | 'canceladas';
 
 const PESTANAS: { id: Pestana; etiqueta: string }[] = [
   { id: 'todas', etiqueta: 'Todas' },
   { id: 'pendientes', etiqueta: 'Por recibir' },
+  { id: 'parciales', etiqueta: 'Parcialmente recibidas' },
   { id: 'recibidas', etiqueta: 'Recibidas' },
   { id: 'canceladas', etiqueta: 'Canceladas' },
 ];
@@ -117,7 +118,7 @@ function construirColumnas(acciones: AccionesFila): ColumnaTabla<OrdenCompraDto>
     id: 'acciones',
     header: '',
     align: 'derecha',
-    ancho: 'w-44',
+    ancho: 'w-64',
     render: (orden) => {
       // Editar y retirar solo mientras sea un BORRADOR. Desde 'Confirmada' hay
       // un compromiso con el proveedor y, si entró mercancía, movimientos en el
@@ -146,14 +147,21 @@ function construirColumnas(acciones: AccionesFila): ColumnaTabla<OrdenCompraDto>
               >
                 <Pencil size={16} aria-hidden="true" />
               </button>
+              {/*
+                Botón con la palabra "Cancelar", no un bote de basura. El icono
+                de basura promete un borrado que no ocurre: la orden pasa a
+                'Cancelada' y sigue ahí, en su pestaña. El rótulo dice lo mismo
+                que esa pestaña, que es lo que hace entendible el resultado.
+              */}
               <button
                 type="button"
                 onClick={() => onRetirar(orden)}
-                title="Retirar la orden. Queda como Cancelada, no se borra."
-                aria-label={`Retirar la orden ${orden.id}`}
-                className="rounded-md p-1.5 text-slate-500 transition hover:bg-terracota-50 hover:text-terracota-700"
+                title="Cancelar la orden. Queda como Cancelada, no se borra."
+                aria-label={`Cancelar la orden ${orden.id}`}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-terracota-400 hover:bg-terracota-50 hover:text-terracota-700"
               >
-                <Trash2 size={16} aria-hidden="true" />
+                <XCircle size={15} aria-hidden="true" />
+                Cancelar
               </button>
             </>
           ) : null}
@@ -219,13 +227,25 @@ export function Compras() {
     [esSupervision, puedeModificar],
   );
 
+  /**
+   * «Por recibir» y «Parcialmente recibidas» son EXCLUYENTES.
+   *
+   * Antes «Por recibir» era `lineasPendientes > 0`, y una orden que llegó a
+   * medias cumple eso: salía en las dos listas a la vez, contada dos veces.
+   * Ahora «Por recibir» son las que no han recibido NADA todavía, y la otra
+   * pestaña son las que llegaron cortas y esperan el resto.
+   */
+  const esParcial = (o: OrdenCompraDto) => o.estado === 'ParcialmenteRecibida';
+  const esPorRecibir = (o: OrdenCompraDto) => !esParcial(o) && o.lineasPendientes > 0;
+
   const conteos = useMemo(
     () => ({
       // "Todas" excluye las canceladas: una orden retirada no forma parte del
       // trabajo del día, tiene su propia pestaña. Mismo criterio que las
       // existencias deshabilitadas.
       todas: ordenes.filter((o) => o.estado !== 'Cancelada').length,
-      pendientes: ordenes.filter((o) => o.estado !== 'Cancelada' && o.lineasPendientes > 0).length,
+      pendientes: ordenes.filter((o) => o.estado !== 'Cancelada' && esPorRecibir(o)).length,
+      parciales: ordenes.filter((o) => esParcial(o)).length,
       recibidas: ordenes.filter((o) => o.estado === 'Recibida').length,
       canceladas: ordenes.filter((o) => o.estado === 'Cancelada').length,
     }),
@@ -240,7 +260,10 @@ export function Compras() {
     const vigentes = ordenes.filter((o) => o.estado !== 'Cancelada');
 
     if (pestana === 'pendientes') {
-      return vigentes.filter((o) => o.lineasPendientes > 0);
+      return vigentes.filter(esPorRecibir);
+    }
+    if (pestana === 'parciales') {
+      return vigentes.filter(esParcial);
     }
     if (pestana === 'recibidas') {
       return vigentes.filter((o) => o.estado === 'Recibida');
@@ -250,7 +273,8 @@ export function Compras() {
 
   const VACIOS: Record<Pestana, string> = {
     todas: 'No hay órdenes de compra registradas para esta sede.',
-    pendientes: 'No hay órdenes esperando mercancía.',
+    pendientes: 'No hay órdenes esperando su primera entrega.',
+    parciales: 'Ninguna orden llegó corta.',
     recibidas: 'Ninguna orden se ha recibido todavía.',
     canceladas: 'No hay órdenes retiradas.',
   };
@@ -323,14 +347,20 @@ export function Compras() {
 
       {aRetirar ? (
         <Modal
-          titulo={`Retirar la orden #${aRetirar.id}`}
+          titulo={`Cancelar la orden #${aRetirar.id}`}
           descripcion={`${aRetirar.proveedorNombre} — ${aRetirar.sucursalNombre}`}
           ocupado={enviando}
           onCerrar={() => setARetirar(null)}
           pie={
             <>
+              {/*
+                "Volver" y no "Cancelar": el botón de al lado ya cancela la
+                ORDEN, y dos botones que dicen «Cancelar» uno junto al otro, con
+                significados opuestos, es la forma más fácil de que alguien
+                cancele lo que no quería.
+              */}
               <Boton variante="secundaria" onClick={() => setARetirar(null)} disabled={enviando}>
-                Cancelar
+                Volver
               </Boton>
               <Boton
                 onClick={() => {
@@ -345,11 +375,11 @@ export function Compras() {
               >
                 {enviando ? (
                   <>
-                    <Spinner etiqueta="Retirando" />
-                    Retirando…
+                    <Spinner etiqueta="Cancelando" />
+                    Cancelando…
                   </>
                 ) : (
-                  'Retirar orden'
+                  'Cancelar la orden'
                 )}
               </Boton>
             </>

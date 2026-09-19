@@ -909,6 +909,21 @@ public sealed class ComprasService : IComprasService
         var ultima = await _ordenes.ObtenerUltimaLineaConPrecioAsync(
             productoId, proveedorId, cancellationToken);
 
+        // Los dos respaldos, para que la pantalla tenga algo que decir cuando
+        // este proveedor no lista el producto y nunca se le ha comprado, que con
+        // un catalogo de un proveedor por producto es lo normal.
+        var costoPromedio = await _inventario.ObtenerCostoPromedioAsync(
+            productoId, cancellationToken);
+
+        var otros = (await _proveedores.ObtenerPreciosDeProductoAsync(productoId, cancellationToken))
+            .Where(pp => pp.ProveedorId != proveedorId && pp.PrecioReferencia is not null)
+            .Select(pp => new PrecioDeOtroProveedorDto(
+                pp.ProveedorId,
+                pp.Proveedor?.Nombre ?? string.Empty,
+                pp.Proveedor?.Activo ?? false,
+                pp.PrecioReferencia!.Value))
+            .ToList();
+
         return new PrecioReferenciaDto(
             producto.Id,
             producto.Nombre,
@@ -926,7 +941,9 @@ public sealed class ComprasService : IComprasService
                     ultima.Unidad?.Simbolo,
                     ultima.PrecioUnitario,
                     ultima.Descuento,
-                    ultima.OrdenCompra.Estado?.ToString() ?? string.Empty));
+                    ultima.OrdenCompra.Estado?.ToString() ?? string.Empty),
+            costoPromedio,
+            otros);
     }
 
     // =========================================================================

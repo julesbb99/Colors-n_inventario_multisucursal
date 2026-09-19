@@ -42,6 +42,23 @@ public interface IInventarioRepository
         int id,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Lo que ha costado un producto de media, por unidad base, segun las
+    /// existencias ACTIVAS de toda la red.
+    ///
+    /// Se pondera por cantidad: una sede con 1.500 litros pesa mas que otra con
+    /// 30, que es lo que tiene sentido si lo que se busca es "a cuanto nos sale
+    /// normalmente". Cuando no hay cantidad en ninguna parte -todo agotado- cae
+    /// a la media simple de los costos, que sigue diciendo algo; el promedio
+    /// ponderado daria una division por cero.
+    ///
+    /// Nulo si el producto no tiene ninguna existencia con costo, que es el caso
+    /// de uno recien dado de alta.
+    /// </summary>
+    Task<decimal?> ObtenerCostoPromedioAsync(
+        int productoId,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Saldo de una pareja (sede, producto), o <c>null</c> si no hay fila.</summary>
     Task<InventarioSucursal?> ObtenerSaldoAsync(
         int sucursalId,

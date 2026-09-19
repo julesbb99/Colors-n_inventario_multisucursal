@@ -3,6 +3,7 @@ import {
   CalendarClock,
   DollarSign,
   Droplet,
+  PackageX,
   TrendingUp,
   Truck,
 } from 'lucide-react';
@@ -109,6 +110,25 @@ export function Dashboard() {
           detalle={`Umbral de ${resumen.diasUmbralVencimiento} días, vencidos incluidos`}
           Icono={CalendarClock}
           tono={resumen.alertasVencimiento > 0 ? 'critico' : 'neutro'}
+        />
+        {/*
+          Lo que se pidió y llegó corto.
+
+          El rótulo dice "por llegar" y no "merma" a propósito: esa mercancía
+          nunca entró a la bodega, así que no hay saldo del que descontarla, y
+          la orden sigue abierta esperando el resto. Llamarlo merma haría pensar
+          que el inventario ya bajó por esta cifra, y no bajó.
+        */}
+        <TarjetaKpi
+          etiqueta="Faltante por llegar"
+          valor={formatearCOP(resumen.faltanteRecepcionValor)}
+          detalle={
+            resumen.ordenesParcialmenteRecibidas > 0
+              ? `${formatearEntero(resumen.ordenesParcialmenteRecibidas)} orden(es) recibidas a medias`
+              : 'Ninguna orden llegó corta'
+          }
+          Icono={PackageX}
+          tono={resumen.ordenesParcialmenteRecibidas > 0 ? 'alerta' : 'neutro'}
         />
       </div>
 

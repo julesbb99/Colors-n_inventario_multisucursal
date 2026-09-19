@@ -113,6 +113,11 @@ public sealed class DashboardService : IDashboardService
         var alertasVencimiento = await _repositorio.ContarLotesProximosAVencerAsync(
             sede, HoyLocal().AddDays(horizonte), cancellationToken);
 
+        // Lo que se pidio y llego corto. Va en el resumen porque es dinero
+        // comprometido que todavia no esta en la bodega, y hasta ahora solo se
+        // veia entrando orden por orden.
+        var faltante = await _repositorio.ObtenerFaltanteRecepcionAsync(sede, cancellationToken);
+
         return new ResumenGeneralDto(
             // La sede EFECTIVA, no la pedida: asi un gerente que no mando nada
             // ve en la respuesta cual es el alcance real de lo que esta mirando.
@@ -129,6 +134,8 @@ public sealed class DashboardService : IDashboardService
             stock.Sum(s => s.ProductosEnAlerta),
             alertasVencimiento,
             horizonte,
+            faltante.Ordenes,
+            faltante.Valor,
             DateTime.Now);
     }
 

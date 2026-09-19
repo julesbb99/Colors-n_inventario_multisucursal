@@ -216,26 +216,54 @@ export function PanelPreciosReferencia({
                 ? ((ultima - lista) / lista) * 100
                 : null;
 
+            const costo =
+              dato.costoPromedio === null
+                ? null
+                : aUnidadElegida(dato.costoPromedio, dato.unidadBaseSimbolo);
+
+            const otros = dato.otrosProveedores.map((otro) => ({
+              ...otro,
+              convertido: aUnidadElegida(otro.precioReferencia, dato.unidadBaseSimbolo),
+            }));
+
+            /**
+             * De dónde sale el precio que ofrece el botón, en este orden:
+             *
+             *   1. lo pactado con ESTE proveedor;
+             *   2. el costo promedio del producto en bodega;
+             *   3. lo que cobra el proveedor más barato que sí lo lista.
+             *
+             * El orden no es arbitrario: va de lo más específico -un acuerdo con
+             * quien se le está comprando- a lo más general. Y el rótulo del
+             * botón dice cuál de los tres se está usando, porque aceptar un
+             * precio creyendo que está pactado cuando es una media de bodega es
+             * justo el error que esto debe evitar.
+             */
+            const masBarato = dato.otrosProveedores[0] ?? null;
+            const origen =
+              dato.precioReferencia !== null
+                ? { valor: dato.precioReferencia, etiqueta: 'lista' }
+                : dato.costoPromedio !== null
+                  ? { valor: dato.costoPromedio, etiqueta: 'costo' }
+                  : masBarato !== null
+                    ? { valor: masBarato.precioReferencia, etiqueta: 'otro proveedor' }
+                    : null;
+
             // El precio que se rellena va en la unidad de ESTA LÍNEA, no en la
             // que se está mirando arriba: lo que se guarda en la orden es el
             // precio por la unidad en que se pide.
             const unidadLinea = unidades.find((u) => u.id === Number(linea.unidadId));
+            const factorBase = factorPorSimbolo(unidades, dato.unidadBaseSimbolo);
             const precioParaLinea =
-              dato.precioReferencia !== null &&
+              origen !== null &&
               unidadLinea?.factorConversionLitros != null &&
-              factorPorSimbolo(unidades, dato.unidadBaseSimbolo) !== null
-                ? convertirCosto(
-                    dato.precioReferencia,
-                    factorPorSimbolo(unidades, dato.unidadBaseSimbolo) ?? 1,
-                    unidadLinea.factorConversionLitros,
-                  )
+              factorBase !== null
+                ? convertirCosto(origen.valor, factorBase, unidadLinea.factorConversionLitros)
                 : null;
 
             return (
-              <li
-                key={linea.clave}
-                className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-white px-3 py-2 text-sm"
-              >
+              <li key={linea.clave} className="flex flex-col gap-1 rounded-lg bg-white px-3 py-2 text-sm">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                 <span className="min-w-0 flex-1 font-medium text-slate-900">
                   {dato.productoNombre}
                 </span>
@@ -243,13 +271,29 @@ export function PanelPreciosReferencia({
                 <span className="text-slate-500">
                   Lista{' '}
                   {lista === null ? (
-                    <span className="text-slate-400">sin precio pactado</span>
+                    <span className="text-slate-400">no la surte este proveedor</span>
                   ) : (
                     <span className="font-semibold tabular-nums text-slate-800">
                       {formatearCOP(lista)} / {destino?.simbolo}
                     </span>
                   )}
                 </span>
+
+                {/*
+                  El costo promedio de bodega. Se muestra SIEMPRE que exista, no
+                  solo como respaldo: es lo que de verdad ha costado el producto,
+                  y comparado con la lista dice si el acuerdo sigue siendo bueno.
+                  Con un catálogo de un proveedor por producto, además, suele ser
+                  lo único que hay.
+                */}
+                {costo !== null ? (
+                  <span className="text-slate-500">
+                    Costo en bodega{' '}
+                    <span className="font-semibold tabular-nums text-slate-800">
+                      {formatearCOP(costo)} / {destino?.simbolo}
+                    </span>
+                  </span>
+                ) : null}
 
                 <span className="text-slate-500">
                   Última{' '}
@@ -289,16 +333,45 @@ export function PanelPreciosReferencia({
                   </span>
                 ) : null}
 
-                {precioParaLinea !== null ? (
+                {precioParaLinea !== null && origen !== null ? (
                   <button
                     type="button"
                     onClick={() => onUsarPrecio(linea.clave, precioParaLinea)}
                     disabled={disabled}
                     title={`Poner ${formatearCOP(precioParaLinea)} por ${unidadLinea?.simbolo} en esta línea`}
+                    // El `title` se convierte en el nombre accesible y taparía
+                    // el texto visible: quien navega por voz diría «Usar costo»
+                    // y no encontraría nada. Se antepone el rótulo visible.
+                    aria-label={
+                      `Usar ${origen.etiqueta}: poner ${formatearCOP(precioParaLinea)} ` +
+                      `por ${unidadLinea?.simbolo} en esta línea`
+                    }
                     className="rounded-md border border-petroleo-200 px-2 py-1 text-xs font-semibold text-petroleo-700 transition hover:bg-petroleo-100 disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    Usar lista
+                    Usar {origen.etiqueta}
                   </button>
+                ) : null}
+                </div>
+
+                {/* Lo que cobran los demás, para comparar antes de pedir. */}
+                {otros.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    <span>Otros proveedores:</span>
+                    {otros.map((otro) => (
+                      <span
+                        key={otro.proveedorId}
+                        className="rounded-full bg-slate-100 px-2 py-0.5 tabular-nums"
+                      >
+                        {otro.proveedorNombre}
+                        {otro.activo ? '' : ' (retirado)'}{' '}
+                        <span className="font-semibold text-slate-700">
+                          {otro.convertido === null
+                            ? '—'
+                            : `${formatearCOP(otro.convertido)} / ${destino?.simbolo}`}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
                 ) : null}
               </li>
             );
@@ -306,8 +379,10 @@ export function PanelPreciosReferencia({
       </ul>
 
       <p className="text-xs text-slate-500">
-        El precio de lista está pactado por unidad base del producto; lo de arriba es esa misma
-        cifra convertida. Lo que se guarda en la orden es el precio por la unidad de cada línea.
+        Todo va por unidad base del producto y se convierte a la unidad elegida arriba; lo que se
+        guarda en la orden es el precio por la unidad de cada línea. «Lista» es lo pactado con este
+        proveedor y se edita en <strong className="font-semibold">Proveedores → Lista de precios</strong>;
+        «Costo en bodega» es lo que ha costado de verdad, venga de quien venga.
       </p>
     </div>
   );
