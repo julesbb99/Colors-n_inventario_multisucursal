@@ -42,4 +42,16 @@ public sealed class ProductoRepository : IProductoRepository
             .Where(p => p.Categoria == categoria)
             .OrderBy(p => p.Nombre)
             .ToListAsync(cancellationToken);
+
+    // SIN AsNoTracking, al contrario que las tres de arriba: esta fila se va a
+    // modificar, y sin seguimiento el cambio se perderia en silencio.
+    public Task<Producto?> ObtenerParaActualizarAsync(
+        int id,
+        CancellationToken cancellationToken = default) =>
+        _db.Productos
+            .Include(p => p.UnidadBase)
+            .FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
+
+    public Task<int> GuardarCambiosAsync(CancellationToken cancellationToken = default) =>
+        _db.SaveChangesAsync(cancellationToken);
 }

@@ -30,6 +30,22 @@ public interface IVentaRepository
     /// </summary>
     Task<Venta?> ObtenerPorIdAsync(int id, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// La ultima linea vendida de un producto, con su venta y su unidad, o
+    /// <c>null</c> si nunca se ha vendido.
+    ///
+    /// SE DEVUELVE SIN NORMALIZAR, en la unidad en que se cotizo, a proposito:
+    /// es lo que hay que poder contrastar con la factura. Convertirlo a unidad
+    /// base aqui haria que la cifra no coincidiera con ningun papel.
+    ///
+    /// El filtro por sede es opcional porque el precio no es de una bodega: si
+    /// se pasa, responde "que se cobro aqui"; si no, "que se cobro en la red".
+    /// </summary>
+    Task<VentaDetalle?> ObtenerUltimaVentaDeProductoAsync(
+        int productoId,
+        int? sucursalId = null,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Crea la venta y sus lineas.</summary>
     void AgregarVenta(Venta venta);
 

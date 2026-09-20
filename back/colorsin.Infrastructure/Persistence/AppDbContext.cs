@@ -237,7 +237,12 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<Producto>(e =>
         {
-            e.ToTable("productos");
+            // El precio nulo es "sin fijar"; el cero solo puede ser un error de
+            // digitacion, y colarlo haria que la pantalla rellenara las ventas
+            // con cero pesos.
+            e.ToTable("productos", t => t.HasCheckConstraint(
+                "chk_productos_precio_venta",
+                "`precio_venta` IS NULL OR `precio_venta` > 0"));
             e.HasKey(x => x.Id);
 
             e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
@@ -245,6 +250,7 @@ public class AppDbContext : DbContext
             e.Property(x => x.Categoria).HasColumnName("categoria").HasMaxLength(50);
             e.Property(x => x.Descripcion).HasColumnName("descripcion").HasColumnType("text");
             e.Property(x => x.UnidadBaseId).HasColumnName("unidad_base_id");
+            e.Property(x => x.PrecioVenta).HasColumnName("precio_venta").HasPrecision(12, 2);
 
             e.HasIndex(x => x.UnidadBaseId).HasDatabaseName("idx_productos_unidad_base");
 

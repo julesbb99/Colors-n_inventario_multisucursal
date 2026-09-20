@@ -16,6 +16,16 @@ export interface CatalogosContextValue {
   cargando: boolean;
   /** La unidad base de un producto: es la que conviene preseleccionar. */
   unidadBaseDe: (productoId: number) => number | null;
+  /** El producto completo, para leer su precio de venta sin volver a la API. */
+  productoPorId: (productoId: number) => ProductoDto | null;
+  /**
+   * Vuelve a pedir los catálogos.
+   *
+   * Existe por el precio de venta: es el único dato de aquí que se edita dentro
+   * de la aplicación, y sin esto el formulario de venta seguiría rellenando con
+   * el precio viejo hasta recargar la página.
+   */
+  recargar: () => void;
 }
 
 export const CatalogosContext = createContext<CatalogosContextValue | undefined>(undefined);
@@ -37,6 +47,9 @@ export function CatalogosProvider({ children }: { children: ReactNode }) {
   const [productos, setProductos] = useState<ProductoDto[]>([]);
   const [unidades, setUnidades] = useState<UnidadMedidaDto[]>([]);
   const [cargando, setCargando] = useState(false);
+  // Un contador y no un booleano: pedir dos recargas seguidas con un booleano
+  // solo dispararía la primera.
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
     if (!estaAutenticado) {
@@ -68,7 +81,7 @@ export function CatalogosProvider({ children }: { children: ReactNode }) {
     return () => {
       vigente = false;
     };
-  }, [estaAutenticado]);
+  }, [estaAutenticado, version]);
 
   const valor = useMemo<CatalogosContextValue>(() => {
     const porId = new Map(productos.map((p) => [p.id, p]));
@@ -86,6 +99,8 @@ export function CatalogosProvider({ children }: { children: ReactNode }) {
       })),
       cargando,
       unidadBaseDe: (productoId) => porId.get(productoId)?.unidadBaseId ?? null,
+      productoPorId: (productoId) => porId.get(productoId) ?? null,
+      recargar: () => setVersion((n) => n + 1),
     };
   }, [productos, unidades, cargando]);
 

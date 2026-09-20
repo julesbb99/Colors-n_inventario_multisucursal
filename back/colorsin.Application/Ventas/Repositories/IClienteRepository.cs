@@ -2,7 +2,7 @@ using Colorsin.Domain.Ventas;
 
 namespace Colorsin.Application.Ventas.Repositories;
 
-/// <summary>Acceso de lectura al catalogo de clientes.</summary>
+/// <summary>Acceso al catalogo de clientes.</summary>
 public interface IClienteRepository
 {
     /// <summary>Todos los clientes, ordenados por razon social.</summary>
@@ -24,4 +24,22 @@ public interface IClienteRepository
     /// una venta, donde solo hace falta saber si esta o no.
     /// </summary>
     Task<bool> ExisteAsync(int id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Si ya hay un cliente con ese documento. Sirve para rechazar el alta con
+    /// un mensaje util en vez de dejar que reviente el indice unico
+    /// <c>uq_clientes_documento</c> con un error de MySQL.
+    ///
+    /// No sustituye al indice: entre esta consulta y el INSERT cabe otra alta
+    /// simultanea. El indice es la garantia; esto es el mensaje decente.
+    /// </summary>
+    Task<bool> ExistePorDocumentoAsync(
+        string documento,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Deja preparada el alta de un cliente. No guarda.</summary>
+    void Agregar(Cliente cliente);
+
+    /// <summary>Confirma en la base lo preparado. Devuelve las filas afectadas.</summary>
+    Task<int> GuardarCambiosAsync(CancellationToken cancellationToken = default);
 }

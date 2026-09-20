@@ -22,6 +22,54 @@ public interface IVentasService
         string documento,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Da de alta un cliente y devuelve el creado, ya con su id.
+    ///
+    /// ABIERTO A CUALQUIER ROL: en el mostrador aparece un cliente nuevo a
+    /// diario, y no poder registrarlo significa no poder facturarle.
+    ///
+    /// Lanza <see cref="ClienteDuplicadoException"/> si el documento ya existe
+    /// -con el id del que ya esta, para poder ofrecerlo- y
+    /// <see cref="VentaInvalidaException"/> si falta la razon social, el
+    /// documento o el tipo de persona no es 'Natural' ni 'Juridica'.
+    /// </summary>
+    Task<ClienteDto> CrearClienteAsync(
+        CrearClienteDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// A cuanto se vende un producto: lo fijado, lo que se cobro la ultima vez y
+    /// lo que ha costado en bodega. Ver <see cref="PrecioVentaDto"/>.
+    ///
+    /// <paramref name="sucursalId"/> acota la "ultima venta" a una sede. Nulo
+    /// responde por toda la red.
+    ///
+    /// Lanza <see cref="ReferenciaVentaNoEncontradaException"/> si el producto
+    /// no existe.
+    /// </summary>
+    Task<PrecioVentaDto> ObtenerPrecioVentaAsync(
+        int productoId,
+        int? sucursalId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Fija el precio de venta de un producto, POR UNIDAD BASE, o lo quita si
+    /// llega nulo.
+    ///
+    /// Es una decision de RED, no de sede -las tres heredan la misma lista-, asi
+    /// que el endpoint la reserva al Administrador General.
+    ///
+    /// Rechaza el cero y los negativos con
+    /// <see cref="VentaInvalidaException"/>: para dejar de tener precio esta el
+    /// nulo, y un cero haria que la pantalla rellenara las ventas regaladas.
+    /// </summary>
+    Task<PrecioVentaDto> FijarPrecioVentaAsync(
+        int productoId,
+        GuardarPrecioVentaDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Ventas, de la mas reciente a la mas antigua. Sin detalle.</summary>
     Task<IReadOnlyList<VentaDto>> ObtenerVentasAsync(
         int? sucursalId = null,

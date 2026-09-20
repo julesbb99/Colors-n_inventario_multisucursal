@@ -15,4 +15,19 @@ public interface IProductoRepository
     Task<IReadOnlyList<Producto>> ObtenerPorCategoriaAsync(
         string categoria,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// El producto con ese id CON SEGUIMIENTO, para poder modificarlo y guardar.
+    ///
+    /// Va aparte de <see cref="ObtenerPorIdAsync"/>, que usa <c>AsNoTracking</c>:
+    /// sobre una entidad sin seguimiento, cambiar una propiedad y llamar a
+    /// <c>SaveChanges</c> no guarda nada y no avisa de nada. Hoy lo usa solo el
+    /// precio de venta.
+    /// </summary>
+    Task<Producto?> ObtenerParaActualizarAsync(
+        int id,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Confirma en la base los cambios preparados. Devuelve las filas afectadas.</summary>
+    Task<int> GuardarCambiosAsync(CancellationToken cancellationToken = default);
 }

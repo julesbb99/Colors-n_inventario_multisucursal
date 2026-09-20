@@ -12,6 +12,15 @@ export interface ProductoDto {
   unidadBaseId: number | null;
   unidadBaseNombre: string | null;
   unidadBaseSimbolo: string | null;
+  /**
+   * Precio de venta POR UNIDAD BASE, para toda la red. Nulo si no se ha fijado,
+   * que NO es lo mismo que cero.
+   *
+   * Viaja en el catálogo -que ya está cargado- para que el formulario de venta
+   * pueda rellenar el precio en cuanto se elige el producto, sin una consulta
+   * por línea. Se edita en Ventas → Lista de precios, solo el administrador.
+   */
+  precioVenta: number | null;
 }
 
 /**

@@ -12,6 +12,15 @@ namespace Colorsin.Application.Inventario.DTOs;
 /// </param>
 /// <param name="UnidadBaseNombre">Nombre de esa unidad, para no consultarla aparte.</param>
 /// <param name="UnidadBaseSimbolo">Abreviatura de esa unidad ('L', 'gal').</param>
+/// <param name="PrecioVenta">
+/// Precio de venta POR UNIDAD BASE, para toda la red. Nulo si no se ha fijado,
+/// que NO es lo mismo que cero: una venta sin precio propio se rechaza en vez de
+/// registrarse regalada.
+///
+/// Viaja en el catalogo, y no solo en el endpoint de precios, para que el
+/// formulario de venta pueda rellenar el campo en cuanto se elige el producto,
+/// sin una consulta por linea.
+/// </param>
 public sealed record ProductoDto(
     int Id,
     string Nombre,
@@ -19,4 +28,5 @@ public sealed record ProductoDto(
     string? Descripcion,
     int? UnidadBaseId,
     string? UnidadBaseNombre,
-    string? UnidadBaseSimbolo);
+    string? UnidadBaseSimbolo,
+    decimal? PrecioVenta);

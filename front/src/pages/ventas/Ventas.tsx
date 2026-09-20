@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Tags } from 'lucide-react';
 import { useSede } from '../../hooks/useSede';
+import { useAuth } from '../../hooks/useAuth';
+import { useCatalogos } from '../../hooks/useCatalogos';
 import { useConsulta } from '../../hooks/useConsulta';
 import { obtenerVentas } from '../../services/ventas';
 import type { VentaDto } from '../../models/ventas';
@@ -9,6 +11,7 @@ import type { ColumnaTabla } from '../../components/ui/DataTable';
 import { Alerta } from '../../components/ui/Alerta';
 import { Boton } from '../../components/ui/Boton';
 import { FormularioVenta } from '../../components/ventas/FormularioVenta';
+import { ListaPreciosVenta } from '../../components/ventas/ListaPreciosVenta';
 import { formatearCOP, formatearEntero, formatearFechaHora } from '../../utils/formato';
 
 const SIN_DATOS: VentaDto[] = [];
@@ -38,14 +41,10 @@ const COLUMNAS: ColumnaTabla<VentaDto>[] = [
       <span className="tabular-nums text-slate-600">{formatearFechaHora(v.fecha)}</span>
     ),
   },
-  {
-    id: 'lineas',
-    header: 'Líneas',
-    align: 'derecha',
-    render: (v) => (
-      <span className="tabular-nums text-slate-600">{formatearEntero(v.detalles.length)}</span>
-    ),
-  },
+  // SIN COLUMNA DE LÍNEAS. `GET /api/ventas` no trae el detalle -cargarlo para
+  // cien ventas convertiría una consulta en ciento una-, así que contar aquí
+  // daba cero en todas las filas. Se quitó en vez de arreglarse porque el dato
+  // no se estaba usando para nada: para ver las líneas se abre la venta.
   {
     id: 'total',
     header: 'Total',
@@ -63,8 +62,11 @@ const COLUMNAS: ColumnaTabla<VentaDto>[] = [
 
 export function Ventas() {
   const { sedeActiva, nombreSedeActiva } = useSede();
+  const { esAdminGeneral } = useAuth();
+  const { recargar: recargarCatalogos } = useCatalogos();
   const [busqueda, setBusqueda] = useState('');
   const [abierto, setAbierto] = useState(false);
+  const [preciosAbierto, setPreciosAbierto] = useState(false);
 
   const {
     datos: ventas,
@@ -114,6 +116,15 @@ export function Ventas() {
           />
         </div>
 
+        {/* Los precios de venta son de toda la red y las tres sedes los heredan:
+            solo el Administrador General los toca, igual que en la API. */}
+        {esAdminGeneral ? (
+          <Boton variante="secundaria" onClick={() => setPreciosAbierto(true)}>
+            <Tags size={17} aria-hidden="true" />
+            Lista de precios
+          </Boton>
+        ) : null}
+
         {/* Registrar una venta la puede hacer cualquier rol: es el día a día del
             mostrador, no una decisión de supervisión. */}
         <Boton onClick={() => setAbierto(true)}>
@@ -124,6 +135,15 @@ export function Ventas() {
 
       {abierto ? (
         <FormularioVenta onCerrar={() => setAbierto(false)} onRegistrada={recargar} />
+      ) : null}
+
+      {preciosAbierto ? (
+        <ListaPreciosVenta
+          onCerrar={() => setPreciosAbierto(false)}
+          // El catálogo lleva el precio: sin recargarlo, el formulario de venta
+          // seguiría rellenando con el viejo hasta recargar la página.
+          onGuardado={recargarCatalogos}
+        />
       ) : null}
 
       {error ? (

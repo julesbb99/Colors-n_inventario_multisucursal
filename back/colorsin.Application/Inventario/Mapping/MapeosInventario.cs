@@ -13,7 +13,8 @@ public static class MapeosInventario
         producto.Descripcion,
         producto.UnidadBaseId,
         producto.UnidadBase?.Nombre,
-        producto.UnidadBase?.Simbolo);
+        producto.UnidadBase?.Simbolo,
+        producto.PrecioVenta);
 
     public static InventarioSucursalDto ToDto(this InventarioSucursal saldo) => new(
         saldo.Id,

@@ -101,6 +101,167 @@ public sealed class VentasService : IVentasService
     }
 
     // =========================================================================
+    // CLIENTES
+    // =========================================================================
+
+    public async Task<ClienteDto> CrearClienteAsync(
+        CrearClienteDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        var razonSocial = Limpiar(peticion.RazonSocial);
+        var documento = Limpiar(peticion.Documento);
+
+        if (razonSocial is null)
+        {
+            throw new VentaInvalidaException("El cliente necesita razon social o nombre.");
+        }
+
+        if (documento is null)
+        {
+            throw new VentaInvalidaException(
+                "El cliente necesita documento: es la cedula o el NIT, y es por lo que se " +
+                "le busca en el mostrador.");
+        }
+
+        // 'Natural' y 'Juridica' se escriben igual en el enum y en la base, asi
+        // que basta con parsear sin distinguir mayusculas. El mensaje enumera
+        // los valores validos porque el DTO los recibe como texto libre.
+        if (!Enum.TryParse<TipoPersona>(peticion.TipoPersona, ignoreCase: true, out var tipo))
+        {
+            throw new VentaInvalidaException(
+                $"El tipo de persona '{peticion.TipoPersona}' no es valido: " +
+                "solo 'Natural' o 'Juridica'.");
+        }
+
+        // Se comprueba antes de insertar para poder devolver el cliente que ya
+        // existe. El indice unico `uq_clientes_documento` sigue siendo la
+        // garantia de verdad -entre esta consulta y el INSERT cabe otra alta-,
+        // pero sin esto el choque saldria como un error 500 sin explicacion.
+        var existente = await _clientes.ObtenerPorDocumentoAsync(documento, cancellationToken);
+        if (existente is not null)
+        {
+            throw new ClienteDuplicadoException(documento, existente.Id, existente.RazonSocial);
+        }
+
+        var cliente = new Cliente
+        {
+            RazonSocial = razonSocial,
+            TipoPersona = tipo,
+            Documento = documento,
+            Telefono = Limpiar(peticion.Telefono),
+            Email = Limpiar(peticion.Email),
+            Direccion = Limpiar(peticion.Direccion)
+        };
+
+        _clientes.Agregar(cliente);
+        await _clientes.GuardarCambiosAsync(cancellationToken);
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo,
+            "CrearCliente",
+            usuarioId,
+            $"Cliente {cliente.Id} '{cliente.RazonSocial}' ({tipo}, doc {cliente.Documento}).",
+            cancellationToken);
+
+        await _clientes.GuardarCambiosAsync(cancellationToken);
+
+        return cliente.ToDto();
+    }
+
+    // =========================================================================
+    // PRECIO DE VENTA
+    // =========================================================================
+
+    public async Task<PrecioVentaDto> ObtenerPrecioVentaAsync(
+        int productoId,
+        int? sucursalId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var producto = await ObtenerProductoAsync(productoId, cancellationToken);
+
+        var ultima = await _ventas.ObtenerUltimaVentaDeProductoAsync(
+            productoId, sucursalId, cancellationToken);
+
+        var costo = await _inventario.ObtenerCostoPromedioAsync(productoId, cancellationToken);
+
+        // El margen solo tiene sentido con las dos cifras y con un costo que no
+        // sea cero. Se calcula SOBRE EL COSTO -"deja un 30% sobre lo que nos
+        // cuesta"- y sale negativo cuando el precio fijado esta por debajo, que
+        // es justo la senal que hay que ver.
+        var margen = producto.PrecioVenta is decimal precio && costo is decimal c && c > 0m
+            ? Math.Round(((precio - c) / c) * 100m, 2, MidpointRounding.AwayFromZero)
+            : (decimal?)null;
+
+        return new PrecioVentaDto(
+            producto.Id,
+            producto.Nombre,
+            producto.UnidadBase?.Simbolo,
+            producto.PrecioVenta,
+            ultima is null
+                ? null
+                : new UltimaVentaDto(
+                    ultima.VentaId,
+                    ultima.Venta?.Fecha,
+                    ultima.Cantidad,
+                    ultima.UnidadId,
+                    ultima.Unidad?.Simbolo,
+                    ultima.PrecioUnitario,
+                    ultima.Descuento),
+            costo,
+            margen);
+    }
+
+    public async Task<PrecioVentaDto> FijarPrecioVentaAsync(
+        int productoId,
+        GuardarPrecioVentaDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        // Con seguimiento: esta fila se modifica. Con AsNoTracking el cambio se
+        // perderia sin que nada avisara.
+        var producto = await _productos.ObtenerParaActualizarAsync(productoId, cancellationToken)
+            ?? throw new ReferenciaVentaNoEncontradaException(
+                $"No existe el producto {productoId}.");
+
+        if (peticion.PrecioVenta is decimal nuevo && nuevo <= 0m)
+        {
+            throw new VentaInvalidaException(
+                $"El precio de venta debe ser mayor que cero; llego {Num(nuevo)}. " +
+                "Para dejar el producto sin precio, manda el precio nulo.");
+        }
+
+        var anterior = producto.PrecioVenta;
+        producto.PrecioVenta = peticion.PrecioVenta;
+
+        await _productos.GuardarCambiosAsync(cancellationToken);
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo,
+            "FijarPrecioVenta",
+            usuarioId,
+            $"Producto {producto.Id} '{producto.Nombre}': " +
+            $"{(anterior is null ? "sin precio" : Num(anterior.Value))} -> " +
+            $"{(producto.PrecioVenta is null ? "sin precio" : Num(producto.PrecioVenta.Value))} " +
+            $"por {producto.UnidadBase?.Simbolo ?? "unidad base"}.",
+            cancellationToken);
+
+        await _productos.GuardarCambiosAsync(cancellationToken);
+
+        return await ObtenerPrecioVentaAsync(productoId, null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Recorta los espacios y convierte el vacio en nulo.
+    ///
+    /// Un campo opcional que llega como cadena vacia no es "sin dato": guardado
+    /// asi, una busqueda por telefono vacio encontraria filas, y la pantalla
+    /// pintaria un hueco donde deberia decir que no hay.
+    /// </summary>
+    private static string? Limpiar(string? valor) =>
+        string.IsNullOrWhiteSpace(valor) ? null : valor.Trim();
+
+    // =========================================================================
     // REGISTRAR VENTA
     // =========================================================================
 
@@ -182,12 +343,18 @@ public sealed class VentasService : IVentasService
         }
     }
 
-    /// <summary>Una linea de la peticion ya convertida a unidad base.</summary>
+    /// <summary>Una linea de la peticion ya convertida a unidad base y con precio resuelto.</summary>
+    /// <param name="Precio">
+    /// El precio que de verdad se va a cobrar por unidad de venta: el que trajo
+    /// la linea, o el de lista convertido a esa unidad. Nunca es nulo, a
+    /// diferencia de <c>Peticion.PrecioUnitario</c>.
+    /// </param>
     private sealed record LineaPreparada(
         CrearLineaVentaDto Peticion,
         Producto Producto,
         decimal Cantidad,
         decimal CantidadBase,
+        decimal Precio,
         VentaDetalle Detalle);
 
     private async Task<VentaRegistradaDto> RegistrarEnTransaccionAsync(
@@ -198,21 +365,28 @@ public sealed class VentasService : IVentasService
         // --- 1. Convertir cada linea a unidad base -------------------------------
         var preparadas = new List<LineaPreparada>(peticion.Lineas.Count);
 
-        foreach (var linea in peticion.Lineas)
+        for (var i = 0; i < peticion.Lineas.Count; i++)
         {
+            var linea = peticion.Lineas[i];
             var producto = await ObtenerProductoAsync(linea.ProductoId, cancellationToken);
             var cantidad = MapeosVentas.RedondearCantidad(linea.Cantidad);
             var cantidadBase = await ConvertirAUnidadBaseAsync(
                 cantidad, linea.UnidadId, producto, cancellationToken);
+            var precio = await ResolverPrecioAsync(linea, producto, i + 1, cancellationToken);
 
             preparadas.Add(new LineaPreparada(
-                linea, producto, cantidad, cantidadBase,
+                linea, producto, cantidad, cantidadBase, precio,
                 new VentaDetalle
                 {
                     ProductoId = linea.ProductoId,
                     Cantidad = cantidad,
                     UnidadId = linea.UnidadId,
-                    PrecioUnitario = linea.PrecioUnitario,
+                    // El precio RESUELTO, no el que vino. Antes se guardaba
+                    // `linea.PrecioUnitario` tal cual, asi que una linea sin
+                    // precio dejaba la columna en NULL y el total la contaba
+                    // como cero: la venta quedaba registrada regalada y nada lo
+                    // decia.
+                    PrecioUnitario = precio,
                     Descuento = linea.Descuento
                 }));
         }
@@ -252,7 +426,7 @@ public sealed class VentasService : IVentasService
 
         // --- 3. Crear la venta con su detalle ------------------------------------
         var total = preparadas.Sum(p => MapeosVentas.CalcularSubtotalNeto(
-            p.Cantidad, p.Peticion.PrecioUnitario ?? 0m, p.Peticion.Descuento));
+            p.Cantidad, p.Precio, p.Peticion.Descuento));
 
         var venta = new Venta
         {
@@ -535,6 +709,95 @@ public sealed class VentasService : IVentasService
                 $"Convertida a unidad base, la cantidad {Num(cantidad)} se redondea a cero " +
                 $"con {ConversorUnidades.DecimalesCantidadBase} decimales.")
         };
+    }
+
+    /// <summary>
+    /// El precio que se va a cobrar por unidad de venta de esta linea.
+    ///
+    /// DOS FUENTES, EN ESTE ORDEN:
+    ///
+    ///   1. el precio que trae la linea, si trae alguno. Quien vende puede
+    ///      apartarse de la lista -una rebaja, un precio pactado- y eso manda;
+    ///   2. el precio de lista del producto, CONVERTIDO de unidad base a la
+    ///      unidad de la linea.
+    ///
+    /// Y SI NO HAY NINGUNA DE LAS DOS, SE RECHAZA. Antes no: la columna se
+    /// quedaba en NULL y el total sumaba cero, asi que la venta entraba regalada
+    /// con el stock descontado y sin ninguna senal. Un cero en una venta solo
+    /// puede ser un descuido, y es mas barato rechazarlo que descubrirlo al
+    /// cuadrar la caja.
+    ///
+    /// LA CONVERSION ES LA INVERSA DE LA DE CANTIDAD. Una cantidad en galones es
+    /// un numero MENOR que en litros -3,78541 L caben en un galon-, pero el
+    /// precio POR galon es MAYOR en la misma proporcion. De ahi la division por
+    /// el factor de la unidad base y la multiplicacion por el de la linea, y no
+    /// al reves.
+    /// </summary>
+    private async Task<decimal> ResolverPrecioAsync(
+        CrearLineaVentaDto linea,
+        Producto producto,
+        int numero,
+        CancellationToken cancellationToken)
+    {
+        if (linea.PrecioUnitario is decimal propio)
+        {
+            return propio;
+        }
+
+        if (producto.PrecioVenta is not decimal precioBase)
+        {
+            throw new VentaInvalidaException(
+                $"Linea {numero}: '{producto.Nombre}' no tiene precio de venta fijado, y la " +
+                "linea tampoco trae uno. Escribe el precio en la linea, o fija el del producto " +
+                "en Ventas -> Lista de precios.");
+        }
+
+        var unidadBaseId = producto.UnidadBaseId
+            ?? throw new ConversionVentaImposibleException(
+                $"El producto '{producto.Nombre}' no tiene unidad base definida, asi que su " +
+                "precio de lista no se puede pasar a la unidad de la linea.");
+
+        // Misma unidad: el precio de lista ya esta en ella y convertir seria
+        // multiplicar y dividir por el mismo factor.
+        if (linea.UnidadId == unidadBaseId)
+        {
+            return precioBase;
+        }
+
+        var origen = await _unidades.ObtenerFactorConversionLitrosAsync(
+            unidadBaseId, cancellationToken);
+        var destino = await _unidades.ObtenerFactorConversionLitrosAsync(
+            linea.UnidadId, cancellationToken);
+
+        if (!destino.UnidadExiste)
+        {
+            throw new ReferenciaVentaNoEncontradaException(
+                $"No existe la unidad de medida {linea.UnidadId}.");
+        }
+
+        if (origen.FactorLitros is not decimal factorBase || factorBase <= 0m ||
+            destino.FactorLitros is not decimal factorLinea)
+        {
+            throw new ConversionVentaImposibleException(
+                $"Linea {numero}: no hay conversion entre la unidad base {unidadBaseId} y la " +
+                $"unidad {linea.UnidadId}, asi que el precio de lista de '{producto.Nombre}' " +
+                "no se puede aplicar. Escribe el precio en la linea.");
+        }
+
+        // A 2 decimales, que es lo que guarda `venta_detalle.precio_unitario`.
+        // AwayFromZero y no el redondeo bancario por omision de .NET: en dinero
+        // se espera que 0,5 suba.
+        var convertido = Math.Round(
+            precioBase / factorBase * factorLinea, 2, MidpointRounding.AwayFromZero);
+
+        if (convertido <= 0m)
+        {
+            throw new VentaInvalidaException(
+                $"Linea {numero}: el precio de lista de '{producto.Nombre}' convertido a la " +
+                "unidad de la linea se redondea a cero. Escribe el precio en la linea.");
+        }
+
+        return convertido;
     }
 
     /// <summary>

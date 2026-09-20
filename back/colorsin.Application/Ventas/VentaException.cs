@@ -119,6 +119,29 @@ public sealed class ReferenciaVentaNoEncontradaException : VentaException
 }
 
 /// <summary>
+/// Ya hay un cliente con ese documento.
+///
+/// Lleva el id del que ya existe para que el mostrador pueda ofrecerlo en vez de
+/// dejar a quien atiende con un error y sin salida: lo que suele pasar es que la
+/// persona ya estaba registrada y quien la atiende no la encontro al buscar.
+/// </summary>
+public sealed class ClienteDuplicadoException : VentaException
+{
+    public ClienteDuplicadoException(string documento, int clienteId, string razonSocial)
+        : base($"Ya existe un cliente con el documento '{documento}': " +
+               $"{razonSocial} (id {clienteId}).")
+    {
+        Documento = documento;
+        ClienteId = clienteId;
+        RazonSocial = razonSocial;
+    }
+
+    public string Documento { get; }
+    public int ClienteId { get; }
+    public string RazonSocial { get; }
+}
+
+/// <summary>
 /// No hay forma de convertir la cantidad a la unidad base del producto: el
 /// producto no declara unidad base, o las unidades no son convertibles entre si.
 /// </summary>

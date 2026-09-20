@@ -43,4 +43,14 @@ public sealed class ClienteRepository : IClienteRepository
     // AnyAsync se traduce a un EXISTS: no trae ninguna fila.
     public Task<bool> ExisteAsync(int id, CancellationToken cancellationToken = default) =>
         _db.Clientes.AnyAsync(c => c.Id == id, cancellationToken);
+
+    public Task<bool> ExistePorDocumentoAsync(
+        string documento,
+        CancellationToken cancellationToken = default) =>
+        _db.Clientes.AnyAsync(c => c.Documento == documento, cancellationToken);
+
+    public void Agregar(Cliente cliente) => _db.Clientes.Add(cliente);
+
+    public Task<int> GuardarCambiosAsync(CancellationToken cancellationToken = default) =>
+        _db.SaveChangesAsync(cancellationToken);
 }

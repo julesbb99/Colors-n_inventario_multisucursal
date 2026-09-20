@@ -1,3 +1,4 @@
+using Colorsin.Api.Auth;
 using Colorsin.Application.Comun.Auth;
 using Colorsin.Application.Ventas;
 using Colorsin.Application.Ventas.DTOs;
@@ -64,6 +65,104 @@ public static class VentasEndpoints
                 "no el id interno.")
             .Produces<ClienteDto>()
             .Produces(StatusCodes.Status404NotFound);
+
+        grupo.MapPost("/clientes", async (
+                CrearClienteDto peticion,
+                IVentasService ventas,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                try
+                {
+                    var cliente = await ventas.CrearClienteAsync(
+                        peticion, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                    // 201 con Location: el mostrador acaba de crear un recurso y
+                    // la respuesta dice donde vive, con el id que asigno MySQL.
+                    return Results.Created($"/api/ventas/clientes/{cliente.Id}", cliente);
+                }
+                catch (VentaException ex)
+                {
+                    return Traducir(ex);
+                }
+            })
+            .WithName("VentasCrearCliente")
+            .WithSummary("Da de alta un cliente. Cualquier rol.")
+            .WithDescription(
+                "ABIERTO A CUALQUIER ROL: en el mostrador aparece un cliente nuevo a diario y no " +
+                "poder registrarlo significa no poder facturarle. Sin sede: un cliente le compra " +
+                "a la red, no a una bodega. " +
+                "Responde 409 si el documento ya existe, con el nombre y el id del que ya esta, " +
+                "porque lo habitual es que la persona estuviera registrada y no se encontrara al " +
+                "buscar.")
+            .Produces<ClienteDto>(StatusCodes.Status201Created)
+            .Produces(StatusCodes.Status409Conflict);
+
+        // ---------------------------------------------------------------------
+        // Precios de venta
+        //
+        // Viven en /api/ventas y no en /api/productos porque son una decision
+        // COMERCIAL, no del catalogo: el producto existe igual sin precio.
+        // ---------------------------------------------------------------------
+        grupo.MapGet("/precios/{productoId:int}", async (
+                int productoId,
+                IVentasService ventas,
+                IUsuarioContexto contexto,
+                int? sucursalId,
+                CancellationToken cancellationToken) =>
+            {
+                try
+                {
+                    return Results.Ok(await ventas.ObtenerPrecioVentaAsync(
+                        productoId,
+                        // La "ultima venta" se acota a lo que quien pregunta
+                        // puede ver. Un gerente de Armenia no deberia deducir a
+                        // como vende Cali a partir de este endpoint.
+                        contexto.ResolverFiltroSucursal(sucursalId),
+                        cancellationToken));
+                }
+                catch (VentaException ex)
+                {
+                    return Traducir(ex);
+                }
+            })
+            .WithName("VentasPrecioDeProducto")
+            .WithSummary("A cuanto se vende un producto: lista, ultima venta y costo")
+            .WithDescription(
+                "Tres cifras que NO se funden en una: el precio fijado y el costo van POR UNIDAD " +
+                "BASE; la ultima venta va en la unidad en que se cotizo, sin normalizar, para que " +
+                "coincida con la factura. El margen se calcula sobre el costo y sale NEGATIVO " +
+                "cuando el precio fijado esta por debajo.")
+            .Produces<PrecioVentaDto>();
+
+        grupo.MapPut("/precios/{productoId:int}", async (
+                int productoId,
+                GuardarPrecioVentaDto peticion,
+                IVentasService ventas,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                try
+                {
+                    return Results.Ok(await ventas.FijarPrecioVentaAsync(
+                        productoId, peticion, contexto.UsuarioIdRequerido(), cancellationToken));
+                }
+                catch (VentaException ex)
+                {
+                    return Traducir(ex);
+                }
+            })
+            .WithName("VentasFijarPrecio")
+            .WithSummary("Fija el precio de venta por unidad base. Solo Administrador General.")
+            .WithDescription(
+                "Un precio nulo lo QUITA de la lista, que no es lo mismo que ponerlo en cero: sin " +
+                "precio, la venta que no traiga uno propio se rechaza; en cero se registraria " +
+                "regalada. " +
+                "Restringido al Administrador General por el mismo motivo que la lista de precios " +
+                "de proveedor: el precio es de toda la red y las tres sedes lo heredan, asi que no " +
+                "cabe en el alcance de un gerente de sede.")
+            .Produces<PrecioVentaDto>()
+            .RequireAuthorization(PoliticasAutorizacion.SoloAdminGeneral);
 
         // ---------------------------------------------------------------------
         // Ventas
@@ -156,6 +255,13 @@ public static class VentasEndpoints
         ReferenciaVentaNoEncontradaException =>
             RespuestasHttp.Fallo(
                 StatusCodes.Status404NotFound, "Referencia no encontrada", ex.Message),
+
+        // 409 y no 400: la peticion esta bien formada y quien la manda tiene
+        // permiso; lo que la impide es una fila que ya existe. El mensaje lleva
+        // el nombre y el id del cliente que ya esta, para poder ofrecerlo.
+        ClienteDuplicadoException =>
+            RespuestasHttp.Fallo(
+                StatusCodes.Status409Conflict, "Cliente duplicado", ex.Message),
 
         // Venta mal formada o conversion de unidades imposible: los dos son
         // errores de lo que se mando, y se arreglan corrigiendolo.

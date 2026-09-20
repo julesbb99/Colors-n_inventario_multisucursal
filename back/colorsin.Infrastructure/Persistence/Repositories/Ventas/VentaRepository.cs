@@ -78,6 +78,34 @@ public sealed class VentaRepository : IVentaRepository
                 .ThenInclude(d => d.Unidad)
             .FirstOrDefaultAsync(v => v.Id == id, cancellationToken);
 
+    public async Task<VentaDetalle?> ObtenerUltimaVentaDeProductoAsync(
+        int productoId,
+        int? sucursalId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var consulta = _db.VentaDetalles
+            .AsNoTracking()
+            .Include(d => d.Venta)
+            .Include(d => d.Unidad)
+            // Una linea sin precio no sirve de referencia: diria "la ultima vez
+            // se cobro nada". Es el caso que dejaba la venta sin precio antes de
+            // que existiera la lista.
+            .Where(d => d.ProductoId == productoId && d.PrecioUnitario != null)
+            .AsQueryable();
+
+        if (sucursalId is int sid)
+        {
+            consulta = consulta.Where(d => d.Venta.SucursalId == sid);
+        }
+
+        return await consulta
+            // Por fecha de la venta, y el id desempata: dos ventas del mismo
+            // segundo son perfectamente posibles en un mostrador.
+            .OrderByDescending(d => d.Venta.Fecha)
+            .ThenByDescending(d => d.VentaId)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     // =========================================================================
     // ESCRITURA
     // =========================================================================
