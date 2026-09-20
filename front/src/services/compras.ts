@@ -138,7 +138,10 @@ export async function cancelarOrdenCompra(id: number) {
  * sede, crea o alimenta el lote y deja fila en el libro mayor.
  *
  * Cuerpo sin `lineas` significa "llego todo lo que faltaba de la orden".
- * Restringido a supervision.
+ *
+ * Abierta a CUALQUIER ROL, incluido el operador: contar lo que baja del camion
+ * es su trabajo. La API si comprueba la sede y responde 403 si la orden es de
+ * otra bodega.
  */
 export async function recibirOrdenCompra(id: number, peticion: ConfirmarRecepcionDto) {
   const { data } = await axiosInstance.post(`${RUTA}/${id}/recepciones`, peticion);

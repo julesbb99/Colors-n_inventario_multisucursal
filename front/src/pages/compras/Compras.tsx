@@ -41,19 +41,25 @@ const PESTANAS: { id: Pestana; etiqueta: string }[] = [
 const SIN_DATOS: OrdenCompraDto[] = [];
 
 interface AccionesFila {
-  onRecibir: ((orden: OrdenCompraDto) => void) | null;
+  onRecibir: (orden: OrdenCompraDto) => void;
   onEditar: (orden: OrdenCompraDto) => void;
   onRetirar: (orden: OrdenCompraDto) => void;
-  /** Si quien mira puede modificar ESA orden. Se decide por fila, por la sede. */
-  puedeModificar: (orden: OrdenCompraDto) => boolean;
+  /**
+   * Si esa orden es de una sede sobre la que quien mira puede OPERAR.
+   *
+   * Se decide por fila y por SEDE, no por rol: ninguna de las tres acciones
+   * -editar, cancelar, recibir- está reservada a supervisión. Lo que sí importa
+   * es que la orden sea de tu bodega, y el Administrador General las ve todas.
+   */
+  esDeSuSede: (orden: OrdenCompraDto) => boolean;
 }
 
 /**
- * Las columnas dependen del rol: la de acciones solo existe para supervisión.
- * Por eso se construyen en una función y no en una constante de módulo.
+ * Las acciones dependen de la fila -del estado de la orden y de su sede-, no de
+ * una constante. Por eso se construyen en una función.
  */
 function construirColumnas(acciones: AccionesFila): ColumnaTabla<OrdenCompraDto>[] {
-  const { onRecibir, onEditar, onRetirar, puedeModificar } = acciones;
+  const { onRecibir, onEditar, onRetirar, esDeSuSede } = acciones;
   const columnas: ColumnaTabla<OrdenCompraDto>[] = [
   {
     id: 'numero',
@@ -124,11 +130,15 @@ function construirColumnas(acciones: AccionesFila): ColumnaTabla<OrdenCompraDto>
       // un compromiso con el proveedor y, si entró mercancía, movimientos en el
       // libro mayor que citan esta orden. La API responde 409; esto solo evita
       // ofrecer el botón.
-      const borrador = esBorrador(orden.estado) && puedeModificar(orden);
+      const borrador = esBorrador(orden.estado) && esDeSuSede(orden);
 
-      // Recibir solo tiene sentido con líneas pendientes: una ya recibida no
-      // admite otra recepción y el botón solo llevaría a un 409.
-      const puedeRecibir = onRecibir !== null && orden.lineasPendientes > 0;
+      // Recibir es de CUALQUIER ROL en su propia sede, incluido el operador:
+      // quien cuenta lo que baja del camión es él. Las dos condiciones son:
+      //
+      //   la sede            no se ingresa mercancía en la bodega de otro
+      //   líneas pendientes  una orden ya completa no admite otra recepción y
+      //                      el botón solo llevaría a un 409
+      const puedeRecibir = esDeSuSede(orden) && orden.lineasPendientes > 0;
 
       if (!borrador && !puedeRecibir) {
         return null;
@@ -169,8 +179,9 @@ function construirColumnas(acciones: AccionesFila): ColumnaTabla<OrdenCompraDto>
           {puedeRecibir ? (
             <button
               type="button"
-              onClick={() => onRecibir!(orden)}
+              onClick={() => onRecibir(orden)}
               title="Registrar recepción"
+              aria-label={`Recibir la orden ${orden.id}`}
               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-terracota-400 hover:text-terracota-700"
             >
               <PackageCheck size={15} aria-hidden="true" />
@@ -187,7 +198,7 @@ function construirColumnas(acciones: AccionesFila): ColumnaTabla<OrdenCompraDto>
 
 export function Compras() {
   const { sedeActiva, nombreSedeActiva } = useSede();
-  const { esSupervision, esAdminGeneral, sucursalId: sedePropia } = useAuth();
+  const { esAdminGeneral, sucursalId: sedePropia } = useAuth();
   const [pestana, setPestana] = useState<Pestana>('todas');
   const [formulario, setFormulario] = useState<{ orden: OrdenCompraDto | null } | null>(null);
   const [recibiendo, setRecibiendo] = useState<OrdenCompraDto | null>(null);
@@ -205,13 +216,18 @@ export function Compras() {
   const { enviando, error: errorAccion, esPermisos: accionEsPermisos, enviar } = useEnvio();
 
   /**
-   * Si quien mira puede modificar ESA orden.
+   * Si esa orden cae dentro del alcance de quien mira.
    *
-   * Por sede, no por rol: crear y editar una orden Pendiente está abierto a
-   * cualquier rol -es un borrador- pero solo en la sede propia. No es el
-   * control: la API comprueba lo mismo.
+   * POR SEDE, NO POR ROL. Las tres acciones de compras -crear y editar un
+   * borrador, cancelarlo, recibir la mercancía- están abiertas a cualquier rol;
+   * lo único que las limita es la bodega. El Administrador General no tiene sede
+   * propia y las alcanza todas.
+   *
+   * No es el control de verdad: la API comprueba lo mismo con
+   * `ExigirAccesoASucursal` y responde 403. Esto solo evita ofrecer un botón que
+   * iba a fallar.
    */
-  const puedeModificar = useMemo(
+  const esDeSuSede = useMemo(
     () => (orden: OrdenCompraDto) => esAdminGeneral || orden.sucursalId === sedePropia,
     [esAdminGeneral, sedePropia],
   );
@@ -219,12 +235,12 @@ export function Compras() {
   const columnas = useMemo(
     () =>
       construirColumnas({
-        onRecibir: esSupervision ? setRecibiendo : null,
+        onRecibir: setRecibiendo,
         onEditar: (orden) => setFormulario({ orden }),
         onRetirar: setARetirar,
-        puedeModificar,
+        esDeSuSede,
       }),
-    [esSupervision, puedeModificar],
+    [esDeSuSede],
   );
 
   /**
@@ -324,9 +340,8 @@ export function Compras() {
           </Boton>
         ) : null}
 
-        {/* Abierto a cualquier rol: una orden Pendiente es un borrador. Lo que
-            obliga a la empresa es confirmarla o recibirla, y eso sigue siendo
-            de supervisión. */}
+        {/* Abierto a cualquier rol: una orden Pendiente es un borrador, no un
+            compromiso. Solo se puede crear para la sede propia. */}
         <Boton onClick={() => setFormulario({ orden: null })}>
           <Plus size={17} aria-hidden="true" />
           Nueva orden

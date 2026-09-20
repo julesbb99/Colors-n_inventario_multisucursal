@@ -13,7 +13,7 @@ namespace Colorsin.Api.Endpoints;
 /// cuerpo, asi que se comprueba directamente. Recibir una entrega solo trae el
 /// id de la orden, y la sede esta EN la orden: hay que leerla antes para poder
 /// comprobarla. Ese es el motivo de la consulta previa en la recepcion; sin
-/// ella, un gerente podria ingresar mercancia a la bodega de otra sede con solo
+/// ella, cualquiera podria ingresar mercancia a la bodega de otra sede con solo
 /// saber el numero de orden.
 ///
 /// La carrera entre esa lectura y la operacion es inofensiva: la sede de una
@@ -278,9 +278,8 @@ public static class ComprasEndpoints
             .WithDescription(
                 "No mueve stock: una orden es una intencion de compra. Las existencias cambian al " +
                 "confirmar la recepcion. Quien la crea sale del token. " +
-                "ABIERTO AL OPERADOR: una orden Pendiente es un borrador, no un compromiso; lo " +
-                "que obliga a la empresa es confirmarla o recibirla, y esas dos siguen siendo de " +
-                "supervision. La sede si se comprueba: solo se pide para la propia.")
+                "ABIERTO AL OPERADOR: una orden Pendiente es un borrador, no un compromiso. " +
+                "La sede si se comprueba: solo se pide para la propia.")
             .Produces<ResultadoOrdenCompra>();
 
         // ---------------------------------------------------------------------
@@ -399,22 +398,31 @@ public static class ComprasEndpoints
                         CodigoDe(resultado.Error), "Recepcion rechazada", resultado.Mensaje);
             })
             .WithName("ComprasConfirmarRecepcion")
-            .WithSummary("Registra que llego mercancia de la orden. Solo supervision.")
+            .WithSummary("Registra que llego mercancia de la orden. Cualquier rol, en su sede.")
             .WithDescription(
                 "Es la unica operacion de compras que toca inventario: sube el saldo, anexa un " +
                 "movimiento de Ingreso por linea y crea o engrosa los lotes. Admite entregas " +
                 "parciales y se puede llamar varias veces: cada llamada acumula sobre lo ya " +
                 "recibido. Con el cuerpo vacio se recibe todo lo que falte. " +
-                "Restringido a Administrador General y Gerente de Sucursal.")
+                "ABIERTO AL OPERADOR: contar lo que baja del camion es su trabajo. La sede si " +
+                "se comprueba, y los ajustes manuales de stock siguen siendo de supervision.")
             .Produces<ResultadoRecepcion>()
-            // Dar por recibida una compra es aceptar la mercancia y con ella la
-            // factura: cierra el documento y habilita el pago. Es la operacion
-            // que la especificacion nombra como "Confirmar Compras".
+            // ABIERTO AL OPERADOR, a diferencia de los ajustes de inventario.
             //
-            // Ojo con no confundirla con la recepcion de un TRASLADO, que si
-            // puede hacer un operador: alli no se acepta nada de un tercero, solo
-            // se mueve stock entre dos bodegas de la misma empresa.
-            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+            // Recibir es ANOTAR UN HECHO: llegaron 250 de los 300 litros, y hay
+            // una factura y un camion que lo respaldan. Quien lo presencia es el
+            // operador. Cuando esto exigia supervision, el resultado practico era
+            // que la mercancia entraba a la bodega horas o dias antes de figurar
+            // en el sistema, y todo lo que se apoya en el saldo -las alertas de
+            // minimo, el FEFO de los lotes- trabajaba con datos viejos.
+            //
+            // No se confunda con un ajuste manual de stock, que sigue cerrado al
+            // operador: alli no hay hecho que anotar, se corrige la cifra a mano.
+            //
+            // Es su propia politica y no un rol mas en Supervision, porque
+            // ampliar aquella habria abierto de paso las siete rutas de
+            // inventario y las de traslados.
+            .RequireAuthorization(PoliticasAutorizacion.RecepcionMercancia);
 
         return rutas;
     }

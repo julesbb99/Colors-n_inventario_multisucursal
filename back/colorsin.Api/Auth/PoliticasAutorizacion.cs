@@ -26,13 +26,16 @@ namespace Colorsin.Api.Auth;
 public static class PoliticasAutorizacion
 {
     /// <summary>
-    /// Operaciones con consecuencia economica o de cierre de documento:
-    /// comprometer dinero con un proveedor, dar por recibida una compra, decidir
-    /// que un traslado no se atiende, ajustar stock a mano.
+    /// Operaciones que DECIDEN sobre el inventario sin un hecho externo que las
+    /// respalde: ajustar stock a mano, registrar una merma, decidir que un
+    /// traslado no se atiende.
     ///
     /// Administrador General y Gerente de Sucursal. Deja fuera al Operador, no
     /// por desconfianza sino porque son decisiones de quien responde por el
     /// resultado de la sede, no de quien ejecuta el dia a dia.
+    ///
+    /// NO incluye recibir una compra, aunque lo parezca: eso tiene su propia
+    /// politica, <see cref="RecepcionMercancia"/>, y alli esta el porque.
     /// </summary>
     public const string Supervision = "supervision";
 
@@ -52,6 +55,33 @@ public static class PoliticasAutorizacion
     public const string SoloAdminGeneral = "solo-admin-general";
 
     /// <summary>
+    /// Registrar que llego mercancia de una compra.
+    ///
+    /// LOS TRES ROLES, y por eso NO es <see cref="Supervision"/>. Recibir es
+    /// trabajo de bodega: quien abre las cajas y cuenta lo que llego es el
+    /// operador, y era justo el unico que no podia anotarlo. Obligar a que lo
+    /// tecleara un gerente no anadia control -el gerente no estuvo en la
+    /// descarga- y solo conseguia que el stock quedara desactualizado hasta que
+    /// alguien con rango pasara por el sistema.
+    ///
+    /// LO QUE NO SE AMPLIA. Es una politica aparte y no un rol mas en
+    /// <see cref="Supervision"/>, porque esa cubre ademas los ajustes manuales de
+    /// stock, las mermas y las decisiones sobre traslados. Recibir es ANOTAR UN
+    /// HECHO -llegaron 250 litros-; un ajuste es corregir la realidad a mano sin
+    /// nada que lo respalde, y eso sigue cerrado al operador. Meter al operador
+    /// en Supervision le habria abierto las siete rutas de inventario de paso.
+    ///
+    /// EL EJE DE SEDE NO SE TOCA: el endpoint sigue llamando a
+    /// <c>ExigirAccesoASucursal</c>, asi que un operador de Cali no puede
+    /// ingresar mercancia en la bodega de Armenia.
+    ///
+    /// Se enumeran los tres roles en vez de pedir solo autenticacion para que un
+    /// rol que se agregue manana -un auditor de solo lectura, por ejemplo- no
+    /// herede el permiso por omision.
+    /// </summary>
+    public const string RecepcionMercancia = "recepcion-mercancia";
+
+    /// <summary>
     /// Registra las politicas. Se llama desde el arranque, junto a
     /// <c>AddAuthorization</c>.
     /// </summary>
@@ -67,6 +97,13 @@ public static class PoliticasAutorizacion
         opciones.AddPolicy(SoloAdminGeneral, politica => politica
             .RequireAuthenticatedUser()
             .RequireRole(RolesColorsin.AdminGeneral));
+
+        opciones.AddPolicy(RecepcionMercancia, politica => politica
+            .RequireAuthenticatedUser()
+            .RequireRole(
+                RolesColorsin.AdminGeneral,
+                RolesColorsin.GerenteSucursal,
+                RolesColorsin.Operador));
 
         return opciones;
     }
