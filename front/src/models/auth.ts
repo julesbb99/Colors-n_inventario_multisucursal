@@ -67,6 +67,14 @@ export interface Usuario {
   /** Nulo en el Administrador General, que no pertenece a ninguna sede. */
   sucursalId: number | null;
   sucursalNombre: string | null;
+  /**
+   * `false` si el perfil está deshabilitado: no puede iniciar sesión.
+   *
+   * NO ES UN BORRADO. El usuario sigue en la base con toda su historia —sus
+   * ventas, sus movimientos, su rastro en la bitácora— porque esas filas no
+   * pueden quedarse sin responsable. Se puede volver a habilitar.
+   */
+  activo: boolean;
 }
 
 /** Respuesta de POST /api/auth/login. */

@@ -45,13 +45,71 @@ public sealed class UsuarioService : IUsuarioService
 
     public async Task<IReadOnlyList<UsuarioDto>> ListarAsync(
         int? sucursalId = null,
+        bool incluirInactivos = false,
         CancellationToken cancellationToken = default)
     {
         var usuarios = sucursalId is null
-            ? await _repositorio.ObtenerTodosAsync(cancellationToken)
-            : await _repositorio.ObtenerPorSucursalAsync(sucursalId.Value, cancellationToken);
+            ? await _repositorio.ObtenerTodosAsync(incluirInactivos, cancellationToken)
+            : await _repositorio.ObtenerPorSucursalAsync(
+                sucursalId.Value, incluirInactivos, cancellationToken);
 
         return usuarios.Select(u => u.ToDto()).ToList();
+    }
+
+    public async Task<ResultadoUsuario> CambiarEstadoAsync(
+        int id,
+        bool activo,
+        CreadorUsuario actor,
+        CancellationToken cancellationToken = default)
+    {
+        // Con seguimiento: esta fila se modifica.
+        var usuario = await _repositorio.ObtenerParaActualizarAsync(id, cancellationToken);
+
+        if (usuario is null)
+        {
+            return ResultadoUsuario.Fallo(
+                ErrorUsuario.NoEncontrado,
+                $"No existe el usuario {id}.");
+        }
+
+        // LA JERARQUIA, ANTES QUE NADA. Va primero por lo mismo que en el alta:
+        // si el rango no alcanza, decirle ademas que el perfil ya estaba
+        // deshabilitado seria confirmarle el estado de una cuenta sobre la que
+        // no tiene permiso.
+        var regla = ReglasGestionUsuario.Validar(
+            actor.Rol, actor.SucursalId, actor.UsuarioId,
+            usuario.Id, usuario.Rol, usuario.SucursalId);
+
+        if (!regla.Permitido)
+        {
+            return ResultadoUsuario.Fallo(ErrorUsuario.NoAutorizado, regla.Mensaje);
+        }
+
+        if (usuario.Activo == activo)
+        {
+            return ResultadoUsuario.Fallo(
+                ErrorUsuario.SinCambio,
+                $"El perfil de {usuario.Nombre} ya estaba " +
+                $"{(activo ? "habilitado" : "deshabilitado")}.");
+        }
+
+        usuario.Activo = activo;
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo,
+            activo ? "HabilitarUsuario" : "DeshabilitarUsuario",
+            actor.UsuarioId,
+            $"usuario={usuario.Id} | nombre='{usuario.Nombre}' | rol={usuario.Rol} | " +
+            $"sede={usuario.SucursalId?.ToString() ?? "(ninguna)"} | " +
+            $"activo={(activo ? "0->1" : "1->0")}",
+            cancellationToken);
+
+        // Un solo guardado para el cambio y su evento: una cuenta cerrada sin
+        // rastro de quien la cerro es justo lo que la bitacora existe para
+        // impedir.
+        await _repositorio.GuardarCambiosAsync(cancellationToken);
+
+        return ResultadoUsuario.Estado(usuario.ToDto(), activo);
     }
 
     public async Task<UsuarioDto?> ObtenerPorIdAsync(
@@ -169,7 +227,9 @@ public sealed class UsuarioService : IUsuarioService
             usuario.Email,
             TextoDeRol(peticion.Rol),
             usuario.SucursalId,
-            sede.Nombre));
+            sede.Nombre,
+            // Nace habilitado: se acaba de crear para que la persona entre.
+            usuario.Activo));
     }
 
     /// <summary>

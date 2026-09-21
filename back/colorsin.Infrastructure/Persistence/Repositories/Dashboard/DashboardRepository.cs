@@ -54,6 +54,14 @@ public sealed class DashboardRepository : IDashboardRepository
             .Select(s => (string?)s.Nombre)
             .FirstOrDefaultAsync(cancellationToken);
 
+    public async Task<IReadOnlyList<SucursalBasica>> ObtenerSucursalesAsync(
+        CancellationToken cancellationToken = default) =>
+        await _db.Sucursales
+            .AsNoTracking()
+            .OrderBy(s => s.Nombre)
+            .Select(s => new SucursalBasica(s.Id, s.Nombre, s.Ciudad))
+            .ToListAsync(cancellationToken);
+
     // =========================================================================
     // VENTAS
     // =========================================================================
@@ -246,6 +254,225 @@ public sealed class DashboardRepository : IDashboardRepository
                 f.Cantidad,
                 f.Total ?? 0m,
                 f.Ultima))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<VentasPorMesDto>> ObtenerVentasPorMesAsync(
+        int? sucursalId,
+        DateTime? desdeInclusivo,
+        CancellationToken cancellationToken = default)
+    {
+        var consulta = _db.Ventas.AsNoTracking().AsQueryable();
+
+        if (sucursalId is int id)
+        {
+            consulta = consulta.Where(v => v.SucursalId == id);
+        }
+
+        if (desdeInclusivo is DateTime desde)
+        {
+            consulta = consulta.Where(v => v.Fecha >= desde);
+        }
+
+        // Se agrupa por (ano, mes) y no por una cadena 'yyyy-MM': agrupar por
+        // texto impide usar el indice sobre `fecha` y ademas obligaria a volver
+        // a partir la cadena aqui para ordenar. YEAR() y MONTH() los traduce
+        // Pomelo sin problema.
+        //
+        // Las ventas con `fecha` nula quedan fuera, y esta bien: una venta sin
+        // fecha no pertenece a ningun mes, y meterla en uno inventado seria
+        // peor que no contarla. El acumulado historico si la cuenta.
+        var filas = await consulta
+            .Where(v => v.Fecha != null)
+            .GroupBy(v => new { v.Fecha!.Value.Year, v.Fecha!.Value.Month })
+            .Select(g => new
+            {
+                g.Key.Year,
+                g.Key.Month,
+                Cantidad = g.Count(),
+                Total = g.Sum(v => v.Total)
+            })
+            .OrderBy(x => x.Year)
+            .ThenBy(x => x.Month)
+            .ToListAsync(cancellationToken);
+
+        return filas
+            .Select(f => new VentasPorMesDto(f.Year, f.Month, f.Cantidad, f.Total ?? 0m))
+            .ToList();
+    }
+
+    public async Task<HistoricoVentas> ObtenerAcumuladoVentasAsync(
+        int? sucursalId,
+        CancellationToken cancellationToken = default)
+    {
+        var consulta = _db.Ventas.AsNoTracking().AsQueryable();
+
+        if (sucursalId is int id)
+        {
+            consulta = consulta.Where(v => v.SucursalId == id);
+        }
+
+        // Los cuatro agregados en UNA pasada. Agrupar por una constante es el
+        // modo de pedirle a EF un GROUP BY sin clave; sin el, cada agregado
+        // saldria como su propia consulta.
+        var fila = await consulta
+            .GroupBy(_ => 1)
+            .Select(g => new
+            {
+                Cantidad = g.Count(),
+                Total = g.Sum(v => v.Total),
+                Primera = g.Min(v => v.Fecha),
+                Ultima = g.Max(v => v.Fecha)
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return fila is null
+            // Sin ninguna venta no hay grupo, y eso es cero, no un error.
+            ? new HistoricoVentas(0, 0m, null, null)
+            : new HistoricoVentas(fila.Cantidad, fila.Total ?? 0m, fila.Primera, fila.Ultima);
+    }
+
+    public async Task<IReadOnlyList<VendidoPorProducto>> ObtenerVendidoPorProductoAsync(
+        int? sucursalId,
+        DateTime desdeInclusivo,
+        DateTime hastaExclusivo,
+        CancellationToken cancellationToken = default)
+    {
+        var lineas = _db.VentaDetalles
+            .AsNoTracking()
+            .Where(d => d.Venta.Fecha >= desdeInclusivo && d.Venta.Fecha < hastaExclusivo);
+
+        if (sucursalId is int id)
+        {
+            lineas = lineas.Where(d => d.Venta.SucursalId == id);
+        }
+
+        // Misma conversion a unidad base que ObtenerProductosMasVendidosAsync,
+        // y por el mismo motivo escrita a mano: ConversorUnidades es un metodo
+        // de C# y esto tiene que viajar a SQL. Alli esta la explicacion larga.
+        var planas = lineas.Select(d => new
+        {
+            d.ProductoId,
+
+            CantidadBase = d.UnidadId == d.Producto.UnidadBaseId
+                ? d.Cantidad
+                : (d.Unidad.FactorConversionLitros == null
+                        || d.Producto.UnidadBase!.FactorConversionLitros == null
+                        || d.Producto.UnidadBase.FactorConversionLitros.Value == 0m
+                    ? (decimal?)null
+                    : d.Cantidad
+                        * d.Unidad.FactorConversionLitros.Value
+                        / d.Producto.UnidadBase.FactorConversionLitros.Value),
+
+            Neto = d.Cantidad * d.PrecioUnitario * (1m - d.Descuento / 100m)
+        });
+
+        var filas = await planas
+            .GroupBy(x => x.ProductoId)
+            .Select(g => new
+            {
+                ProductoId = g.Key,
+                CantidadBase = g.Sum(x => x.CantidadBase),
+                TotalFacturado = g.Sum(x => x.Neto)
+            })
+            .ToListAsync(cancellationToken);
+
+        return filas
+            .Select(f => new VendidoPorProducto(
+                f.ProductoId, f.CantidadBase, f.TotalFacturado ?? 0m))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<SaldoPorProducto>> ObtenerSaldoPorProductoAsync(
+        int? sucursalId,
+        CancellationToken cancellationToken = default)
+    {
+        // Se recorre el CATALOGO, no la tabla de saldos: un producto que nunca
+        // entro a la sede no tiene fila alli, y desaparecer del informe es justo
+        // lo contrario de lo que merece un producto que no se mueve.
+        var filas = await _db.Productos
+            .AsNoTracking()
+            .Select(p => new
+            {
+                p.Id,
+                p.Nombre,
+                p.Categoria,
+                Simbolo = p.UnidadBase != null ? p.UnidadBase.Simbolo : null,
+                // Suma sobre la navegacion: EF la saca como subconsulta
+                // correlacionada por `producto_id`, que esta indexado.
+                //
+                // SIN CONVERTIR A LITROS, a diferencia del resumen general: aqui
+                // cada producto se compara CONSIGO MISMO -lo vendido contra lo
+                // que tiene- asi que la unidad base propia es la correcta y
+                // convertir solo anadiria un factor que se cancela.
+                Saldo = p.Inventarios
+                    .Where(i => sucursalId == null || i.SucursalId == sucursalId)
+                    .Sum(i => (decimal?)i.CantidadBase)
+            })
+            .ToListAsync(cancellationToken);
+
+        return filas
+            .Select(f => new SaldoPorProducto(
+                f.Id, f.Nombre, f.Categoria, f.Simbolo, f.Saldo ?? 0m))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<VentasPorSucursal>> ObtenerVentasPorSucursalAsync(
+        DateTime desdeInclusivo,
+        DateTime hastaExclusivo,
+        CancellationToken cancellationToken = default)
+    {
+        // SIN filtro de sede: esta consulta alimenta la comparativa, que por
+        // definicion mira todas. Quien decide si se puede ver es el servicio.
+        var filas = await _db.Ventas
+            .AsNoTracking()
+            .Where(v => v.Fecha >= desdeInclusivo && v.Fecha < hastaExclusivo)
+            .GroupBy(v => v.SucursalId)
+            .Select(g => new
+            {
+                SucursalId = g.Key,
+                Cantidad = g.Count(),
+                Total = g.Sum(v => v.Total)
+            })
+            .ToListAsync(cancellationToken);
+
+        return filas
+            .Select(f => new VentasPorSucursal(f.SucursalId, f.Cantidad, f.Total ?? 0m))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<TrasladosPorSucursal>> ObtenerTrasladosPorSucursalAsync(
+        DateTime desdeInclusivo,
+        DateTime hastaExclusivo,
+        CancellationToken cancellationToken = default)
+    {
+        var enRango = _db.Transferencias
+            .AsNoTracking()
+            .Where(t => t.FechaSolicitud >= desdeInclusivo && t.FechaSolicitud < hastaExclusivo);
+
+        // DOS CONSULTAS Y NO UNA. Un traslado pertenece a dos sedes a la vez
+        // -una lo manda, otra lo recibe- y un solo GROUP BY solo puede agrupar
+        // por una de las dos columnas. Contarlo por origen y por destino en
+        // sentencias separadas es lo que permite que cada sede aparezca con sus
+        // dos cifras sin duplicar la fila.
+        var despachados = await enRango
+            .GroupBy(t => t.SucursalOrigenId)
+            .Select(g => new { SucursalId = g.Key, Cantidad = g.Count() })
+            .ToDictionaryAsync(x => x.SucursalId, x => x.Cantidad, cancellationToken);
+
+        var recibidos = await enRango
+            .GroupBy(t => t.SucursalDestinoId)
+            .Select(g => new { SucursalId = g.Key, Cantidad = g.Count() })
+            .ToDictionaryAsync(x => x.SucursalId, x => x.Cantidad, cancellationToken);
+
+        // La union de las dos: una sede que solo despacha tiene que salir igual
+        // que una que solo recibe, con la otra cifra en cero.
+        return despachados.Keys
+            .Union(recibidos.Keys)
+            .Select(id => new TrasladosPorSucursal(
+                id,
+                despachados.GetValueOrDefault(id),
+                recibidos.GetValueOrDefault(id)))
             .ToList();
     }
 

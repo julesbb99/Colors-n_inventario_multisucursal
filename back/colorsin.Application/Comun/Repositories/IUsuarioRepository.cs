@@ -10,7 +10,14 @@ public interface IUsuarioRepository
     /// Trae cargada la sede (<c>Usuario.Sucursal</c>) para que el mapeo a DTO
     /// no dispare una consulta por fila.
     /// </summary>
-    Task<IReadOnlyList<Usuario>> ObtenerTodosAsync(CancellationToken cancellationToken = default);
+    /// <param name="incluirInactivos">
+    /// <c>false</c> deja fuera los perfiles deshabilitados, que es lo que quiere
+    /// cualquier desplegable de asignacion: no se le asigna trabajo a alguien
+    /// que no puede entrar.
+    /// </param>
+    Task<IReadOnlyList<Usuario>> ObtenerTodosAsync(
+        bool incluirInactivos = false,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Usuarios de una sede concreta. Sirve para que un Gerente de Sucursal
@@ -18,10 +25,20 @@ public interface IUsuarioRepository
     /// </summary>
     Task<IReadOnlyList<Usuario>> ObtenerPorSucursalAsync(
         int sucursalId,
+        bool incluirInactivos = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>El usuario con ese id, o <c>null</c> si no existe. Incluye la sede.</summary>
     Task<Usuario?> ObtenerPorIdAsync(int id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Como <see cref="ObtenerPorIdAsync"/>, pero RASTREADO para poder
+    /// modificarlo. Incluye tambien los deshabilitados: reactivar uno exige
+    /// poder encontrarlo.
+    /// </summary>
+    Task<Usuario?> ObtenerParaActualizarAsync(
+        int id,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// El usuario con ese correo, o <c>null</c>. Incluye la sede.

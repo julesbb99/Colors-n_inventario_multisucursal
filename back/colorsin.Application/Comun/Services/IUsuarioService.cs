@@ -11,8 +11,13 @@ public interface IUsuarioService
     /// Usuarios de toda la red, o solo los de una sede si se pasa
     /// <paramref name="sucursalId"/>.
     /// </summary>
+    /// <param name="incluirInactivos">
+    /// <c>false</c> -lo normal- deja fuera los perfiles deshabilitados. La
+    /// pantalla que los administra pide los dos, para poder reactivarlos.
+    /// </param>
     Task<IReadOnlyList<UsuarioDto>> ListarAsync(
         int? sucursalId = null,
+        bool incluirInactivos = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>El usuario con ese id, o <c>null</c> si no existe.</summary>
@@ -37,6 +42,34 @@ public interface IUsuarioService
     Task<ResultadoUsuario> CrearAsync(
         CrearUsuarioDto peticion,
         CreadorUsuario creador,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deshabilita o reactiva un perfil.
+    ///
+    /// DESHABILITAR NO BORRA. El usuario sigue en la base con toda su historia
+    /// -sus ventas, sus movimientos, su rastro en la bitacora- porque esas filas
+    /// no pueden quedarse sin responsable: seis tablas lo referencian con
+    /// ON DELETE RESTRICT. Lo que cambia es que deja de poder iniciar sesion.
+    ///
+    /// LA JERARQUIA SE COMPRUEBA AQUI, igual que en el alta, y es la misma:
+    /// ver <see cref="ReglasGestionUsuario"/>. Mas dos reglas propias: nadie se
+    /// deshabilita a si mismo, y ningun Administrador General se deshabilita
+    /// desde la aplicacion.
+    ///
+    /// OJO CON LOS TOKENS YA EMITIDOS: quien tenga sesion abierta sigue
+    /// entrando hasta que su token caduque, porque el contexto de usuario se lee
+    /// del token y no de la base en cada peticion.
+    /// </summary>
+    /// <param name="id">Usuario afectado.</param>
+    /// <param name="activo"><c>false</c> deshabilita, <c>true</c> reactiva.</param>
+    /// <param name="actor">
+    /// Quien lo pide: su id, su rol y su sede. Sale del token, NUNCA del cuerpo.
+    /// </param>
+    Task<ResultadoUsuario> CambiarEstadoAsync(
+        int id,
+        bool activo,
+        CreadorUsuario actor,
         CancellationToken cancellationToken = default);
 }
 

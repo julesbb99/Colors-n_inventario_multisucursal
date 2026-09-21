@@ -31,7 +31,8 @@ public static class MapeosComun
         usuario.SucursalId,
         // Nulo cuando es el Administrador General (sin sede) o cuando quien
         // consulto no incluyo la navegacion.
-        usuario.Sucursal?.Nombre);
+        usuario.Sucursal?.Nombre,
+        usuario.Activo);
 
     public static UnidadMedidaDto ToDto(this UnidadMedida unidad) => new(
         unidad.Id,

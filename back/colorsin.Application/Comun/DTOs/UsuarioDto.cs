@@ -13,10 +13,18 @@ namespace Colorsin.Application.Comun.DTOs;
 /// <param name="Rol">Rol en texto: 'Administrador General', 'Gerente de Sucursal' u 'Operador'.</param>
 /// <param name="SucursalId">Sede asignada. Nulo en el Administrador General, que no pertenece a una sede.</param>
 /// <param name="SucursalNombre">Nombre de la sede asignada, para no obligar a una segunda consulta.</param>
+/// <param name="Activo">
+/// <c>false</c> si el perfil esta deshabilitado: no puede iniciar sesion.
+///
+/// NO ES UN BORRADO: el usuario sigue en la base con toda su historia -sus
+/// ventas, sus movimientos, su rastro en la bitacora- porque esas filas no
+/// pueden quedarse sin responsable. Se puede volver a habilitar.
+/// </param>
 public sealed record UsuarioDto(
     int Id,
     string Nombre,
     string Email,
     string Rol,
     int? SucursalId,
-    string? SucursalNombre);
+    string? SucursalNombre,
+    bool Activo);

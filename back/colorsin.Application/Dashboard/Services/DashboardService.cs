@@ -43,6 +43,33 @@ public sealed class DashboardService : IDashboardService
     private const int TopMinimo = 1;
     private const int TopMaximo = 50;
 
+    /// <summary>
+    /// Ventana del historico de ventas, en meses.
+    ///
+    /// El maximo es de 10 anos: mas alla, la grafica deja de poder dibujarse y
+    /// la consulta empieza a recorrer la tabla entera. El acumulado historico no
+    /// pasa por aqui, asi que pedir menos meses no esconde ninguna venta del
+    /// total.
+    /// </summary>
+    private const int MesesMinimo = 1;
+    private const int MesesMaximo = 120;
+
+    /// <summary>
+    /// Los cortes de la rotacion, en DIAS DE COBERTURA.
+    ///
+    /// Hasta 30 dias de stock es rotacion alta: se vende al ritmo de reponer
+    /// mensualmente. Mas de 90, baja: hay mercancia para un trimestre parada en
+    /// el estante, y en pintura eso ademas es producto que puede caducar antes
+    /// de venderse.
+    ///
+    /// SON UN CRITERIO DE NEGOCIO, no un dato del sistema: no salen de ninguna
+    /// tabla y no hay forma de deducirlos. Viajan en la respuesta para que la
+    /// pantalla pueda rotularlos, y el dia que la empresa fije otros se cambian
+    /// en esta linea.
+    /// </summary>
+    private const int DiasCoberturaAlta = 30;
+    private const int DiasCoberturaBaja = 90;
+
     /// <summary>Decimales de los importes en pesos.</summary>
     private const int DecimalesMoneda = 2;
 
@@ -302,6 +329,238 @@ public sealed class DashboardService : IDashboardService
     }
 
     // =========================================================================
+    // HISTORICO DE VENTAS
+    // =========================================================================
+
+    public async Task<HistoricoVentasDto> ObtenerHistoricoVentasAsync(
+        int? sucursalId = null,
+        int meses = 12,
+        CancellationToken cancellationToken = default)
+    {
+        var sede = _contexto.ResolverFiltroSucursal(sucursalId);
+        var nombreSucursal = await ResolverNombreSucursalAsync(sede, cancellationToken);
+
+        var mesesAcotados = Acotar(meses, MesesMinimo, MesesMaximo);
+
+        // La ventana empieza el dia 1 del mes de hace N-1: pedir "12 meses" con
+        // el mes en curso dentro son once hacia atras mas este. Restar 12 daria
+        // trece columnas en la grafica.
+        var hoy = HoyLocal();
+        var primerMes = new DateOnly(hoy.Year, hoy.Month, 1).AddMonths(-(mesesAcotados - 1));
+
+        var serie = await _repositorio.ObtenerVentasPorMesAsync(
+            sede, primerMes.ToDateTime(TimeOnly.MinValue), cancellationToken);
+
+        // El acumulado NO se suma de la serie: esa viene recortada a la ventana,
+        // y lo que se pidio es "la suma de todas las ventas realizadas".
+        var historico = await _repositorio.ObtenerAcumuladoVentasAsync(sede, cancellationToken);
+
+        // La media se calcula sobre los meses QUE TUVIERON VENTAS de toda la
+        // historia, no sobre los de la ventana ni sobre los solicitados.
+        // Dividir entre 12 cuando el negocio lleva dos meses abiertos daria una
+        // media falsamente baja, y esta cifra se usa para juzgar el mes en curso.
+        var mesesConVentas = await _repositorio.ObtenerVentasPorMesAsync(
+            sede, null, cancellationToken);
+
+        var promedioMensual = mesesConVentas.Count == 0
+            ? 0m
+            : Redondear(historico.Total / mesesConVentas.Count);
+
+        return new HistoricoVentasDto(
+            sede,
+            nombreSucursal,
+            mesesAcotados,
+            serie,
+            historico.Cantidad,
+            historico.Total,
+            historico.Cantidad == 0 ? 0m : Redondear(historico.Total / historico.Cantidad),
+            historico.Primera,
+            historico.Ultima,
+            promedioMensual);
+    }
+
+    // =========================================================================
+    // ROTACION DE PRODUCTOS
+    // =========================================================================
+
+    public async Task<RotacionProductosDto> ObtenerRotacionProductosAsync(
+        DateOnly desde,
+        DateOnly hasta,
+        int? sucursalId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var sede = _contexto.ResolverFiltroSucursal(sucursalId);
+        var nombreSucursal = await ResolverNombreSucursalAsync(sede, cancellationToken);
+
+        // Rango al reves: se responde vacio y sin ir a la base, igual que en
+        // metricas de ventas.
+        if (hasta < desde)
+        {
+            return new RotacionProductosDto(
+                desde, hasta, 0, sede, nombreSucursal,
+                DiasCoberturaAlta, DiasCoberturaBaja,
+                [], 0, 0, 0, 0);
+        }
+
+        // Inclusivo por los dos extremos: del 1 al 30 son 30 dias, no 29. Es el
+        // divisor del ritmo diario, asi que un dia de diferencia se nota.
+        var dias = hasta.DayNumber - desde.DayNumber + 1;
+
+        var vendido = await _repositorio.ObtenerVendidoPorProductoAsync(
+            sede,
+            desde.ToDateTime(TimeOnly.MinValue),
+            hasta.AddDays(1).ToDateTime(TimeOnly.MinValue),
+            cancellationToken);
+
+        var saldos = await _repositorio.ObtenerSaldoPorProductoAsync(sede, cancellationToken);
+
+        var porProducto = vendido.ToDictionary(v => v.ProductoId);
+
+        var filas = saldos
+            .Select(s =>
+            {
+                porProducto.TryGetValue(s.ProductoId, out var v);
+
+                var vendidaBase = v.CantidadBase ?? 0m;
+                var facturado = v.TotalFacturado;
+
+                // VECES QUE ROTO: lo vendido entre lo que hay. Nulo sin saldo,
+                // porque dividir entre cero no da "rotacion infinita" sino que
+                // no se puede medir. El producto agotado que se vendio mucho
+                // sale con cobertura 0, que es la senal util.
+                decimal? veces = s.SaldoBase > 0m
+                    ? Redondear(vendidaBase / s.SaldoBase)
+                    : null;
+
+                // DIAS DE COBERTURA: cuanto aguanta el stock al ritmo del
+                // periodo. Nulo sin ventas: sin ritmo no hay cobertura, y poner
+                // un numero enorme lo mezclaria con los de rotacion baja, que
+                // si se venden.
+                decimal? cobertura = vendidaBase > 0m
+                    ? Redondear(s.SaldoBase * dias / vendidaBase)
+                    : null;
+
+                var clase = vendidaBase <= 0m
+                    ? ClaseRotacion.SinMovimiento
+                    : cobertura is null || cobertura <= DiasCoberturaAlta
+                        ? ClaseRotacion.Alta
+                        : cobertura >= DiasCoberturaBaja
+                            ? ClaseRotacion.Baja
+                            : ClaseRotacion.Media;
+
+                return new RotacionProductoDto(
+                    s.ProductoId,
+                    s.Nombre,
+                    s.Categoria,
+                    s.UnidadBaseSimbolo,
+                    vendidaBase,
+                    s.SaldoBase,
+                    facturado,
+                    veces,
+                    cobertura,
+                    clase.ToString());
+            })
+            // Los sin movimiento AL FINAL aunque su cobertura sea nula: ordenar
+            // por cobertura a secas los pondria primeros -nulo ordena antes- y
+            // encabezarian la lista de "mas demanda" los que no se vendieron.
+            .OrderBy(f => f.Clase == nameof(ClaseRotacion.SinMovimiento) ? 1 : 0)
+            .ThenBy(f => f.DiasCobertura ?? decimal.MaxValue)
+            .ThenByDescending(f => f.TotalFacturado)
+            .ToList();
+
+        return new RotacionProductosDto(
+            desde,
+            hasta,
+            dias,
+            sede,
+            nombreSucursal,
+            DiasCoberturaAlta,
+            DiasCoberturaBaja,
+            filas,
+            filas.Count(f => f.Clase == nameof(ClaseRotacion.Alta)),
+            filas.Count(f => f.Clase == nameof(ClaseRotacion.Media)),
+            filas.Count(f => f.Clase == nameof(ClaseRotacion.Baja)),
+            filas.Count(f => f.Clase == nameof(ClaseRotacion.SinMovimiento)));
+    }
+
+    // =========================================================================
+    // COMPARATIVA ENTRE SEDES
+    // =========================================================================
+
+    public async Task<ComparativaSucursalesDto> ObtenerComparativaSucursalesAsync(
+        DateOnly desde,
+        DateOnly hasta,
+        CancellationToken cancellationToken = default)
+    {
+        // AQUI NO SE LLAMA A ResolverFiltroSucursal, y es la unica excepcion de
+        // este servicio. Una comparativa en la que cada gerente solo ve su
+        // propia fila no es una comparativa: no hay contra que comparar.
+        //
+        // LO QUE SI SE COMPRUEBA es el rol, y se comprueba aqui ademas de en el
+        // endpoint. El endpoint lleva la politica de supervision, pero si algun
+        // dia alguien registra otra ruta a este metodo sin acordarse, esta
+        // linea es la que sigue negando el paso al operador.
+        if (!RolesColorsin.EsSupervision(_contexto.Rol))
+        {
+            throw new AccesoDenegadoException(
+                $"El usuario {_contexto.UsuarioId} (rol '{_contexto.Rol}') pidio la comparativa " +
+                "entre sedes, que esta reservada a administracion y gerencia.");
+        }
+
+        if (hasta < desde)
+        {
+            return new ComparativaSucursalesDto(desde, hasta, [], 0m, 0);
+        }
+
+        var desdeInclusivo = desde.ToDateTime(TimeOnly.MinValue);
+        var hastaExclusivo = hasta.AddDays(1).ToDateTime(TimeOnly.MinValue);
+
+        var sedes = await _repositorio.ObtenerSucursalesAsync(cancellationToken);
+        var ventas = await _repositorio.ObtenerVentasPorSucursalAsync(
+            desdeInclusivo, hastaExclusivo, cancellationToken);
+        var traslados = await _repositorio.ObtenerTrasladosPorSucursalAsync(
+            desdeInclusivo, hastaExclusivo, cancellationToken);
+        var stock = await _repositorio.ObtenerStockPorSucursalAsync(null, cancellationToken);
+
+        var totalRed = ventas.Sum(v => v.Total);
+        var ventasRed = ventas.Sum(v => v.Cantidad);
+
+        var filas = sedes
+            .Select(s =>
+            {
+                var v = ventas.FirstOrDefault(x => x.SucursalId == s.Id);
+                var t = traslados.FirstOrDefault(x => x.SucursalId == s.Id);
+                var inv = stock.FirstOrDefault(x => x.SucursalId == s.Id);
+
+                var saldoLitros = inv?.SaldoLitros ?? 0m;
+
+                return new RendimientoSucursalDto(
+                    s.Id,
+                    s.Nombre,
+                    s.Ciudad,
+                    v.Cantidad,
+                    v.Total,
+                    v.Cantidad == 0 ? 0m : Redondear(v.Total / v.Cantidad),
+                    // Nula cuando la red no vendio nada: sin tarta que repartir,
+                    // un 0 % sugeriria que esta sede se quedo fuera de algo.
+                    totalRed <= 0m ? null : Redondear(v.Total * 100m / totalRed),
+                    saldoLitros,
+                    inv?.ProductosEnAlerta ?? 0,
+                    t.Despachados,
+                    t.Recibidos,
+                    // Productividad del inventario: pesos vendidos por litro
+                    // almacenado. Es lo que permite comparar una sede grande con
+                    // una pequena, cosa que el total nunca dice.
+                    saldoLitros <= 0m ? null : Redondear(v.Total / saldoLitros));
+            })
+            .OrderByDescending(f => f.TotalVendido)
+            .ThenBy(f => f.SucursalNombre, StringComparer.CurrentCulture)
+            .ToList();
+
+        return new ComparativaSucursalesDto(desde, hasta, filas, totalRed, ventasRed);
+    }
+
+    // =========================================================================
     // APOYO
     // =========================================================================
 
@@ -320,6 +579,16 @@ public sealed class DashboardService : IDashboardService
     /// <summary>Deja el valor dentro del rango, sin quejarse.</summary>
     private static int Acotar(int valor, int minimo, int maximo) =>
         Math.Clamp(valor, minimo, maximo);
+
+    /// <summary>
+    /// Redondea a dos decimales, alejando del cero.
+    ///
+    /// <c>AwayFromZero</c> y no el redondeo bancario de .NET, que es el que
+    /// aplica <c>Math.Round</c> por omision: aquel redondea 2,5 a 2 y 3,5 a 4,
+    /// y nadie que lea un informe espera eso.
+    /// </summary>
+    private static decimal Redondear(decimal valor) =>
+        Math.Round(valor, DecimalesMoneda, MidpointRounding.AwayFromZero);
 
     /// <summary>
     /// Cuantos traslados hay en un estado. Cero si el repositorio no devolvio

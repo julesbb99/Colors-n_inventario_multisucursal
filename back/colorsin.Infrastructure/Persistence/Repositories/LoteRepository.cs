@@ -103,6 +103,27 @@ public sealed class LoteRepository : ILoteRepository
                      && l.FechaVencimiento != null
                      && l.FechaVencimiento <= hasta);
 
+        // ESTE FILTRO FALTABA, y es el unico metodo del repositorio al que le
+        // faltaba. El parametro estaba declarado, el endpoint lo resolvia bien
+        // con ResolverFiltroSucursal y el servicio lo pasaba intacto: se perdia
+        // aqui, en la ultima linea del camino.
+        //
+        // LO QUE PROVOCABA. Las alertas de caducidad de CUALQUIER sede salian en
+        // el panel de TODAS, asi que un operario de Cali veia un lote de Armenia
+        // -una fuga del aislamiento por sede- y ademas el tablero se contradecia
+        // consigo mismo: la tarjeta "Por vencer" viene de otra consulta, en
+        // DashboardRepository, que si filtra. El resumen decia 0 y la tabla de
+        // abajo pintaba una fila.
+        //
+        // Se comprueba contra `null` explicitamente y no con `is int`: da igual
+        // en la traduccion, pero deja a la vista que el nulo significa "toda la
+        // red" y no "sin filtro por descuido", que es como se perdio la primera
+        // vez.
+        if (sucursalId is int sid)
+        {
+            consulta = consulta.Where(l => l.SucursalId == sid);
+        }
+
         if (desde is DateOnly inicio)
         {
             consulta = consulta.Where(l => l.FechaVencimiento >= inicio);

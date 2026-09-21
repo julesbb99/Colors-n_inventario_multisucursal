@@ -148,15 +148,23 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
 
     public Task<int> ContarNovedadesAbiertasAsync(
         int transferenciaId,
-        int exceptoNovedadId,
-        CancellationToken cancellationToken = default) =>
-        _db.NovedadesTransferencia
+        int? exceptoNovedadId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var consulta = _db.NovedadesTransferencia
             .AsNoTracking()
-            .CountAsync(
-                n => n.TransferenciaId == transferenciaId
-                  && n.Id != exceptoNovedadId
-                  && n.Estado == EstadoNovedad.Abierta,
-                cancellationToken);
+            .Where(n => n.TransferenciaId == transferenciaId
+                     && n.Estado == EstadoNovedad.Abierta);
+
+        // Se saca en una variable antes del Where: EF no traduce el acceso a
+        // `.Value` de un nullable capturado dentro del arbol de expresion.
+        if (exceptoNovedadId is int excepto)
+        {
+            consulta = consulta.Where(n => n.Id != excepto);
+        }
+
+        return consulta.CountAsync(cancellationToken);
+    }
 
     public async Task<Transferencia?> ObtenerParaOperarAsync(
         int id,

@@ -285,9 +285,13 @@ public sealed class TransferenciasService : ITransferenciasService
 
         var movimientos = await _transferencias.ObtenerMovimientosAsync(id, cancellationToken);
 
-        return transferencia.ToDto(
-            movimientos.Select(m => m.ToDetalleDto()).ToList(),
-            transferencia.Novedades.Select(n => n.ToDto()).ToList());
+        // Las novedades NO se pasan: se dejan leer de la navegacion, que es
+        // donde `ToDto` las ordena de mas reciente a mas antigua. Pasarlas aqui
+        // -como se hacia- las mandaba en el orden en que las devolvio la base,
+        // asi que el detalle y el listado del mismo traslado las daban en
+        // orden distinto. La pantalla elige "la mas reciente" de esa lista, y
+        // con dos ordenes posibles eso es una fuente silenciosa de discrepancia.
+        return transferencia.ToDto(movimientos.Select(m => m.ToDetalleDto()).ToList());
     }
 
     // =========================================================================
@@ -1004,6 +1008,21 @@ public sealed class TransferenciasService : ITransferenciasService
                 peticion.Tratamiento is TratamientoNovedad.Reenvio
                                      or TratamientoNovedad.Reclamacion;
 
+            // ¿EL TRASLADO YA ESTABA ESPERANDO ALGO?
+            //
+            // Se pregunta ANTES de agregar la nueva, para que la cuenta sea de
+            // las que ya existian. La consulta va a la base, asi que la fila que
+            // esta a punto de crearse no entra de todos modos.
+            //
+            // ESTO TAPA UN FALLO REAL, encontrado probando un traslado con
+            // varias novedades: uno que llego corto y estaba en RECLAMACION se
+            // cerraba en cuanto alguien anotaba una averia de "solo
+            // constancia". El apunte nuevo no espera nada, cierto, pero la
+            // reclamacion si, y el traslado no puede darse por terminado
+            // mientras quede algo que cobrar.
+            var pendientesPrevias = await _transferencias.ContarNovedadesAbiertasAsync(
+                peticion.TransferenciaId, null, ct);
+
             // NO se valida el estado del traslado a proposito: los danos se
             // descubren al abrir las cajas, que suele ser despues de cerrarlo.
             var novedad = new NovedadTransferencia
@@ -1034,6 +1053,7 @@ public sealed class TransferenciasService : ITransferenciasService
             // cerrado no hay nada que cambiar.
             var estadoAnterior = transferencia.Estado;
             var cierra = !quedaAbierta
+                      && pendientesPrevias == 0
                       && estadoAnterior == EstadoTransferencia.RecibidaParcial;
 
             if (cierra)
@@ -1047,7 +1067,8 @@ public sealed class TransferenciasService : ITransferenciasService
                 Modulo, "RegistrarNovedadTransferencia", usuarioId,
                 $"novedad={novedad.Id} | transferencia={peticion.TransferenciaId} | " +
                 $"tipo={peticion.Tipo} | tratamiento={peticion.Tratamiento} | " +
-                $"novedad={(quedaAbierta ? "ABIERTA (pendiente de desenlace)" : "cerrada al nacer")} | " +
+                $"estadoNovedad={(quedaAbierta ? "ABIERTA (pendiente de desenlace)" : "cerrada al nacer")} | " +
+                $"pendientesPrevias={pendientesPrevias} | " +
                 $"cantidadAfectada={(peticion.CantidadAfectada is null ? "(sin indicar)" : Num(peticion.CantidadAfectada.Value))} | " +
                 $"estadoTraslado={(cierra ? $"{estadoAnterior}->Cerrada" : $"{estadoAnterior} (sin cambios)")} | " +
                 $"obs={peticion.Observaciones ?? "(sin observaciones)"}",
@@ -1055,7 +1076,8 @@ public sealed class TransferenciasService : ITransferenciasService
 
             await _transferencias.GuardarCambiosAsync(ct);
 
-            return ResultadoNovedad.Ok(novedad.Id, peticion.Tipo, cierra, quedaAbierta);
+            return ResultadoNovedad.Ok(
+                novedad.Id, peticion.Tipo, cierra, quedaAbierta, pendientesPrevias);
         }, cancellationToken);
     }
 

@@ -52,7 +52,13 @@ public enum ErrorUsuario
     SucursalNoEncontrada,
 
     /// <summary>Quien crea no puede crear ese rol, o no en esa sede.</summary>
-    NoAutorizado
+    NoAutorizado,
+
+    /// <summary>El usuario indicado no existe.</summary>
+    NoEncontrado,
+
+    /// <summary>El perfil ya estaba en ese estado: no hay nada que cambiar.</summary>
+    SinCambio
 }
 
 /// <summary>
@@ -76,4 +82,21 @@ public sealed record ResultadoUsuario(
 
     public static ResultadoUsuario Ok(UsuarioDto usuario) =>
         new(true, ErrorUsuario.Ninguno, "Usuario creado.", usuario);
+
+    /// <summary>
+    /// Desenlace de habilitar o deshabilitar un perfil.
+    ///
+    /// El mensaje del apagado dice lo que NO pasa -no se borro nada- porque es
+    /// justo lo que quien pulsa el boton espera que pase, y no pasa.
+    /// </summary>
+    public static ResultadoUsuario Estado(UsuarioDto usuario, bool activo) =>
+        new(true, ErrorUsuario.Ninguno,
+            activo
+                ? $"El perfil de {usuario.Nombre} vuelve a estar habilitado: ya puede iniciar " +
+                  "sesion."
+                : $"El perfil de {usuario.Nombre} queda deshabilitado y no podra iniciar sesion. " +
+                  "No se borro nada: sus ventas, sus movimientos y su rastro en la bitacora " +
+                  "siguen ahi. Si tiene una sesion abierta, seguira entrando hasta que su token " +
+                  "caduque.",
+            usuario);
 }

@@ -72,15 +72,21 @@ public static class ComunEndpoints
                 IUsuarioService usuarios,
                 IUsuarioContexto contexto,
                 int? sucursalId,
+                bool? incluirInactivos,
                 CancellationToken cancellationToken) =>
             TypedResults.Ok(await usuarios.ListarAsync(
-                contexto.ResolverFiltroSucursal(sucursalId), cancellationToken)))
+                contexto.ResolverFiltroSucursal(sucursalId),
+                incluirInactivos ?? false,
+                cancellationToken)))
             .WithName("ComunUsuarios")
             .WithSummary("Usuarios, para asignaciones")
             .WithDescription(
                 "Un gerente ve solo el equipo de su sede; el administrador ve la red, o una sede " +
                 "si la pide. El Operador no accede: la lista con correos y roles del personal es " +
                 "informacion de gestion. " +
+                "Por omision NO trae los perfiles deshabilitados, que es lo que quiere cualquier " +
+                "desplegable de asignacion: no se le asigna trabajo a quien no puede entrar. " +
+                "`incluirInactivos=true` los anade, para la pantalla que los administra. " +
                 "El DTO nunca lleva el hash de la contrasena, por construccion.")
             // Supervision: esta lista existe para asignar trabajo, que es tarea
             // de quien coordina. Ademas expone correos y roles del personal.
@@ -142,7 +148,102 @@ public static class ComunEndpoints
             .Produces<ResultadoUsuario>(StatusCodes.Status201Created)
             .RequireAuthorization(PoliticasAutorizacion.Supervision);
 
+        // ---------------------------------------------------------------------
+        // Habilitar y deshabilitar perfiles
+        //
+        // MISMA PUERTA Y MISMA REGLA QUE EL ALTA. La politica de supervision
+        // deja pasar al administrador y al gerente; lo que cada uno puede
+        // apagar -y de que sede- lo decide ReglasGestionUsuario dentro del
+        // servicio. Es deliberado que la jerarquia sea la misma que la de
+        // creacion: quien puede dar de alta a alguien es quien responde por esa
+        // persona, asi que es quien tiene que poder cerrarle la cuenta.
+        // ---------------------------------------------------------------------
+        grupo.MapDelete("/usuarios/{id:int}", async (
+                int id,
+                IUsuarioService usuarios,
+                IUsuarioContexto contexto,
+                ClaimsPrincipal quien,
+                CancellationToken cancellationToken) =>
+            await CambiarEstadoUsuarioAsync(
+                id, activo: false, usuarios, contexto, quien, cancellationToken))
+            .WithName("ComunDeshabilitarUsuario")
+            .WithSummary("Deshabilita un perfil. Administracion y gerencia.")
+            .WithDescription(
+                "NO BORRA NADA, aunque el verbo sea DELETE: el usuario sigue en la base con toda " +
+                "su historia -sus ventas, sus movimientos, su rastro en la bitacora- porque esas " +
+                "filas no pueden quedarse sin responsable. Lo que cambia es que deja de poder " +
+                "iniciar sesion; el login responde 401 aunque la contrasena sea correcta. " +
+                "JERARQUIA: el Administrador General deshabilita gerentes y operadores de " +
+                "cualquier sede; un gerente solo operadores de SU sede. NADIE deshabilita a un " +
+                "Administrador General por esta via, y NADIE se deshabilita a si mismo: las dos " +
+                "cosas responden 403. " +
+                "OJO CON LAS SESIONES ABIERTAS: el token ya emitido sigue valiendo hasta que " +
+                "caduque, porque el contexto de usuario se lee del token y no de la base.")
+            .Produces<ResultadoUsuario>()
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status409Conflict)
+            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+
+        grupo.MapPost("/usuarios/{id:int}/habilitar", async (
+                int id,
+                IUsuarioService usuarios,
+                IUsuarioContexto contexto,
+                ClaimsPrincipal quien,
+                CancellationToken cancellationToken) =>
+            await CambiarEstadoUsuarioAsync(
+                id, activo: true, usuarios, contexto, quien, cancellationToken))
+            .WithName("ComunHabilitarUsuario")
+            .WithSummary("Devuelve el acceso a un perfil deshabilitado.")
+            .WithDescription(
+                "La contraparte del anterior, con la MISMA jerarquia: quien puede apagar una " +
+                "cuenta tiene que poder volver a encenderla, o cada baja por error acabaria " +
+                "arreglandose en la base de datos. La contrasena no cambia: es la que tenia.")
+            .Produces<ResultadoUsuario>()
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status409Conflict)
+            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+
         return rutas;
+    }
+
+    /// <summary>
+    /// El cuerpo compartido de habilitar y deshabilitar.
+    ///
+    /// Son la misma operacion con la bandera al reves, y van juntas para que no
+    /// puedan divergir: dos copias de esta lectura del token es como una de las
+    /// dos acaba sin la comprobacion de rol.
+    /// </summary>
+    private static async Task<IResult> CambiarEstadoUsuarioAsync(
+        int id,
+        bool activo,
+        IUsuarioService usuarios,
+        IUsuarioContexto contexto,
+        ClaimsPrincipal quien,
+        CancellationToken cancellationToken)
+    {
+        var rol = RolDelDominio(quien.FindFirst(ClaimTypes.Role)?.Value);
+
+        if (rol is null)
+        {
+            return RespuestasHttp.Fallo(
+                StatusCodes.Status403Forbidden,
+                "Sesion invalida",
+                "Tu token no declara un rol reconocido. Vuelve a iniciar sesion.");
+        }
+
+        var actor = new CreadorUsuario(
+            contexto.UsuarioIdRequerido(), rol.Value, contexto.SucursalId);
+
+        var resultado = await usuarios.CambiarEstadoAsync(id, activo, actor, cancellationToken);
+
+        return resultado.Exito
+            ? Results.Ok(resultado)
+            : RespuestasHttp.Fallo(
+                CodigoDe(resultado.Error),
+                activo ? "Habilitacion rechazada" : "Baja rechazada",
+                resultado.Mensaje);
     }
 
     /// <summary>
@@ -166,10 +267,14 @@ public static class ComunEndpoints
         // El rol o la sede no alcanzan. Es el mismo 403 del resto del sistema.
         ErrorUsuario.NoAutorizado => StatusCodes.Status403Forbidden,
 
-        ErrorUsuario.SucursalNoEncontrada => StatusCodes.Status404NotFound,
+        ErrorUsuario.SucursalNoEncontrada
+            or ErrorUsuario.NoEncontrado
+            => StatusCodes.Status404NotFound,
 
         // Existe, pero el estado actual de los datos no admite la operacion.
-        ErrorUsuario.EmailDuplicado => StatusCodes.Status409Conflict,
+        ErrorUsuario.EmailDuplicado
+            or ErrorUsuario.SinCambio
+            => StatusCodes.Status409Conflict,
 
         _ => StatusCodes.Status400BadRequest
     };

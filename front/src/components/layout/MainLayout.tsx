@@ -69,8 +69,34 @@ export function MainLayout() {
 
             {/* El scroll vive AQUI y no en el `body`: asi la barra superior y la
                 lateral quedan fijas y solo se desplaza el contenido, que es lo
-                que se espera de un tablero con tablas largas. */}
-            <main className="min-w-0 flex-1 overflow-y-auto bg-slate-50 px-6 py-5">
+                que se espera de un tablero con tablas largas.
+
+                `relative` NO ES DECORATIVO, y sin el aparecia una SEGUNDA barra
+                de desplazamiento en toda la aplicacion.
+
+                El motivo: las etiquetas para lectores de pantalla llevan la
+                clase `sr-only` de Tailwind, que es `position: absolute`. Un
+                elemento absoluto se coloca respecto a su ancestro POSICIONADO
+                mas cercano, y aqui no habia ninguno: el marco entero era
+                `static`. Asi que su bloque contenedor pasaba a ser el `<html>`,
+                y con el dos consecuencias:
+
+                  1. dejaba de moverse con el scroll de <main>, quedandose
+                     clavado a 2.300 px del inicio del DOCUMENTO;
+                  2. el `overflow-hidden` del contenedor de arriba NO lo
+                     recortaba, porque solo recorta lo que cuelga de el en la
+                     cadena de bloques contenedores.
+
+                Resultado: el documento medi­a 2.362 px de alto aunque todo
+                cupiera en la pantalla, y el navegador pintaba su propia barra
+                al lado de la de <main>. Esa barra se desplazaba 1.594 px sobre
+                nada, que es lo que se veia al final de la pagina.
+
+                Con `relative`, esas etiquetas se anclan a <main> y vuelven a
+                comportarse como parte del contenido. Los modales no se ven
+                afectados: usan `fixed`, al que un ancestro `relative` no le
+                cambia nada. */}
+            <main className="relative min-w-0 flex-1 overflow-y-auto bg-slate-50 px-6 py-5">
               <div className="mb-5">
                 <h1 className="text-xl font-bold tracking-tight text-slate-900">
                   {encabezado.titulo}

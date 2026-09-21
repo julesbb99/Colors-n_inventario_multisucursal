@@ -19,21 +19,29 @@ public sealed class UsuarioRepository : IUsuarioRepository
     // y si algun dia se enciende, seria una consulta por usuario (N+1).
     // Es un LEFT JOIN: SucursalId es opcional en el Administrador General.
     public async Task<IReadOnlyList<Usuario>> ObtenerTodosAsync(
+        bool incluirInactivos = false,
         CancellationToken cancellationToken = default) =>
         await _db.Usuarios
             .AsNoTracking()
             .Include(u => u.Sucursal)
-            .OrderBy(u => u.Nombre)
+            // Los deshabilitados salen solo si se piden. El orden por estado va
+            // primero para que, cuando se pidan, los activos no queden
+            // mezclados entre cuentas que ya no entran.
+            .Where(u => incluirInactivos || u.Activo)
+            .OrderByDescending(u => u.Activo)
+            .ThenBy(u => u.Nombre)
             .ToListAsync(cancellationToken);
 
     public async Task<IReadOnlyList<Usuario>> ObtenerPorSucursalAsync(
         int sucursalId,
+        bool incluirInactivos = false,
         CancellationToken cancellationToken = default) =>
         await _db.Usuarios
             .AsNoTracking()
             .Include(u => u.Sucursal)
-            .Where(u => u.SucursalId == sucursalId)
-            .OrderBy(u => u.Nombre)
+            .Where(u => u.SucursalId == sucursalId && (incluirInactivos || u.Activo))
+            .OrderByDescending(u => u.Activo)
+            .ThenBy(u => u.Nombre)
             .ToListAsync(cancellationToken);
 
     public Task<Usuario?> ObtenerPorIdAsync(
@@ -41,6 +49,15 @@ public sealed class UsuarioRepository : IUsuarioRepository
         CancellationToken cancellationToken = default) =>
         _db.Usuarios
             .AsNoTracking()
+            .Include(u => u.Sucursal)
+            .FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
+
+    public Task<Usuario?> ObtenerParaActualizarAsync(
+        int id,
+        CancellationToken cancellationToken = default) =>
+        _db.Usuarios
+            // SIN AsNoTracking: esta fila se modifica. Y SIN filtrar por activo,
+            // porque reactivar un perfil exige encontrarlo estando apagado.
             .Include(u => u.Sucursal)
             .FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
 

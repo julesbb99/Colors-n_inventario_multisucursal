@@ -180,11 +180,21 @@ public sealed record ResultadoNovedad(
     /// Si la novedad espera desenlace -un reenvio o una reclamacion-. En ese
     /// caso el traslado NO se cierra: sigue pendiente hasta que se resuelva.
     /// </param>
+    /// <param name="pendientesPrevias">
+    /// Cuantas novedades del traslado YA estaban abiertas antes de esta.
+    ///
+    /// Cambia el mensaje, y tiene que cambiarlo: una novedad de "solo
+    /// constancia" sobre un traslado que esta esperando una reclamacion no lo
+    /// cierra, y decir solo "no afecta el estado" dejaria pensando que el
+    /// traslado ya estaba cerrado. Lo que hay que decir es por que sigue
+    /// abierto.
+    /// </param>
     public static ResultadoNovedad Ok(
         int novedadId,
         TipoNovedad tipo,
         bool cerroElTraslado,
-        bool quedaAbierta = false) =>
+        bool quedaAbierta = false,
+        int pendientesPrevias = 0) =>
         new(true, ErrorTransferencia.Ninguno,
             quedaAbierta
                 ? $"Novedad de tipo {tipo} registrada y PENDIENTE de desenlace. El traslado sigue " +
@@ -192,8 +202,12 @@ public sealed record ResultadoNovedad(
                 : cerroElTraslado
                     ? $"Novedad de tipo {tipo} registrada. El traslado queda CERRADO: llego corto " +
                       "y ya se dio cuenta del faltante. No se movio saldo."
-                    : $"Novedad de tipo {tipo} registrada. No afecta el saldo ni el estado del " +
-                      "traslado.",
+                    : pendientesPrevias > 0
+                        ? $"Novedad de tipo {tipo} registrada. El traslado NO se cierra: le " +
+                          $"quedan {pendientesPrevias} novedad(es) pendientes de desenlace. No " +
+                          "se movio saldo."
+                        : $"Novedad de tipo {tipo} registrada. No afecta el saldo ni el estado " +
+                          "del traslado.",
             novedadId);
 
     /// <summary>Desenlace de cerrar una novedad que estaba pendiente.</summary>

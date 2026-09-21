@@ -103,6 +103,37 @@ public sealed class AuthService : IAuthService
 
         // Desde aqui, las credenciales son correctas.
 
+        // PERFIL DESHABILITADO: no entra.
+        //
+        // SE COMPRUEBA DESPUES DE VERIFICAR LA CONTRASENA, y el orden es lo
+        // unico que importa aqui. Comprobarlo antes convertiria este endpoint en
+        // un detector de cuentas: cualquiera podria distinguir un correo que no
+        // existe de uno deshabilitado probando contrasenas al azar. Comprobado
+        // despues, solo se entera quien ya tenia las credenciales, que es su
+        // propio dueno.
+        //
+        // Por eso mismo el motivo SI se puede registrar en la bitacora y SI se
+        // le puede decir a quien lo intenta -lo hace el endpoint, con su propio
+        // mensaje-: llamar a soporte sin saber por que no entras es peor.
+        if (!usuario.Activo)
+        {
+            await _auditoria.RegistrarEventoAsync(
+                ModuloAuditoria,
+                "InicioSesionRechazadoPerfilInactivo",
+                usuario.Id,
+                $"Credenciales correctas pero el perfil esta deshabilitado. " +
+                $"Correo: {usuario.Email}. Rol: {RolesColorsin.ParaClaim(usuario.Rol)}.",
+                cancellationToken);
+
+            await _usuarios.GuardarCambiosAsync(cancellationToken);
+
+            _log.LogWarning(
+                "Inicio de sesion rechazado: el perfil {UsuarioId} esta deshabilitado.",
+                usuario.Id);
+
+            return null;
+        }
+
         // Unico momento en que el sistema tiene la contrasena en claro, y por
         // tanto el unico en que puede rehacer el hash con el costo de hoy sin
         // pedirle nada a nadie.

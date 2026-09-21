@@ -336,57 +336,73 @@ function construirColumnas(
     },
     {
       id: 'novedades',
-      header: 'Novedades',
-      ancho: 'w-48',
+      header: 'Novedad',
+      ancho: 'w-44',
       render: (t) => {
         if (t.novedades.length === 0) {
           return <span className="text-slate-400">—</span>;
         }
 
-        // SE MUESTRA EL TIPO Y LA CANTIDAD, no un contador ni las
-        // observaciones. Un «2» no dice si llegó roto o si falta producto, y las
-        // observaciones son texto libre que no cabe en una celda. El tipo y el
-        // faltante son las dos cosas por las que se mira esta columna.
-        const visibles = t.novedades.slice(0, 2);
+        // UNA SOLA FILA, SIEMPRE.
+        //
+        // Antes se apilaban dos y un «+N más» debajo, y en un traslado con
+        // cuatro eso llenaba la celda de historia vieja: la fila crecía al
+        // triple y ninguna de las cuatro destacaba sobre las demás. En una
+        // tabla, esta columna contesta una pregunta -«¿este traslado tiene
+        // algo?»- y esa se contesta con un renglón.
+        //
+        // CUÁL SE ELIGE: la abierta si la hay, porque es la única sobre la que
+        // queda algo que hacer; si ninguna lo está, la más reciente, que es lo
+        // último que se supo del traslado. `novedades` llega ordenada de más
+        // nueva a más vieja desde la API.
+        const principal = t.novedades.find((n) => n.estado === 'Abierta') ?? t.novedades[0];
+        const otras = t.novedades.length - 1;
+        const abierta = principal.estado === 'Abierta';
+
+        const describir = (n: TransferenciaDto['novedades'][number]) =>
+          `${n.tipo === null ? 'Novedad' : ETIQUETA_TIPO_NOVEDAD[n.tipo]}` +
+          `${n.cantidadAfectada === null ? '' : ` ${formatearVolumen(n.cantidadAfectada, t.unidadSimbolo)}`}` +
+          ` · ${formatearFechaSolo(n.fecha)} · ${
+            n.estado === 'Abierta'
+              ? `pendiente (${ETIQUETA_TRATAMIENTO[n.tratamiento]})`
+              : n.motivoCierre ?? 'cerrada'
+          }`;
 
         return (
-          <span className="flex flex-col gap-1">
-            {visibles.map((n) => {
-              const abierta = n.estado === 'Abierta';
-
-              return (
+          <span className="flex items-center gap-1.5">
+            <span
+              // El tooltip SÍ las lleva todas: la celda muestra una, pero el
+              // dato no se pierde. Sin esto, colapsar a una sería esconderlas.
+              title={t.novedades.map(describir).join('\n')}
+              className={`inline-flex w-fit items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                abierta
+                  ? 'bg-terracota-100 text-terracota-800 ring-1 ring-inset ring-terracota-300'
+                  : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              {/* El punto marca lo que sigue esperando desenlace: es lo que
+                  distingue un pendiente de un apunte ya resuelto. */}
+              {abierta ? (
                 <span
-                  key={n.id}
-                  title={
-                    abierta
-                      ? `Pendiente: ${ETIQUETA_TRATAMIENTO[n.tratamiento]}`
-                      : n.motivoCierre ?? 'Cerrada'
-                  }
-                  className={`inline-flex w-fit items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                    abierta
-                      ? 'bg-terracota-100 text-terracota-800 ring-1 ring-inset ring-terracota-300'
-                      : 'bg-slate-100 text-slate-600'
-                  }`}
-                >
-                  {/* El punto marca lo que sigue esperando desenlace: es lo que
-                      distingue un pendiente de un apunte ya resuelto. */}
-                  {abierta ? (
-                    <span
-                      aria-hidden="true"
-                      className="h-1.5 w-1.5 shrink-0 rounded-full bg-terracota-600"
-                    />
-                  ) : null}
-                  {n.tipo === null ? 'Novedad' : ETIQUETA_TIPO_NOVEDAD[n.tipo]}
-                  {n.cantidadAfectada === null
-                    ? ''
-                    : ` ${formatearVolumen(n.cantidadAfectada, t.unidadSimbolo)}`}
-                </span>
-              );
-            })}
+                  aria-hidden="true"
+                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-terracota-600"
+                />
+              ) : null}
+              {principal.tipo === null ? 'Novedad' : ETIQUETA_TIPO_NOVEDAD[principal.tipo]}
+              {principal.cantidadAfectada === null
+                ? ''
+                : ` ${formatearVolumen(principal.cantidadAfectada, t.unidadSimbolo)}`}
+            </span>
 
-            {t.novedades.length > visibles.length ? (
-              <span className="text-[11px] text-slate-500">
-                +{t.novedades.length - visibles.length} más
+            {/* El resto, como un número y no como más renglones. Que existan
+                hay que decirlo -esconderlas sería mentir sobre el historial-
+                pero no compiten con la que importa. */}
+            {otras > 0 ? (
+              <span
+                title={`Este traslado tiene ${t.novedades.length} novedades en total. Pasa el cursor por la etiqueta para verlas.`}
+                className="shrink-0 cursor-default text-[11px] font-semibold tabular-nums text-slate-400"
+              >
+                +{otras}
               </span>
             ) : null}
           </span>

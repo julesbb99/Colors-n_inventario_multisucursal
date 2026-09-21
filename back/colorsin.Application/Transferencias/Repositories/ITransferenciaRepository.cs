@@ -54,16 +54,21 @@ public interface ITransferenciaRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Cuantas novedades de ese traslado siguen abiertas, SIN CONTAR la que se
-    /// esta cerrando ahora mismo.
+    /// Cuantas novedades de ese traslado siguen abiertas.
     ///
-    /// Es lo que decide si el traslado puede darse por terminado: cierra cuando
-    /// no le queda ninguna. Se excluye la actual porque en ese momento todavia
-    /// no se ha confirmado el cambio en la base.
+    /// ES LO QUE DECIDE SI EL TRASLADO PUEDE DARSE POR TERMINADO: cierra solo
+    /// cuando no le queda ninguna. Se usa en los dos sentidos:
+    ///
+    ///   al CERRAR una   se excluye esa, con <paramref name="exceptoNovedadId"/>,
+    ///                   porque su cambio todavia no esta confirmado
+    ///   al REGISTRAR    sin excluir nada, para saber si el traslado ya tenia
+    ///     otra          algo pendiente antes. Sin esta consulta, una novedad
+    ///                   de "solo constancia" cerraba un traslado que estaba
+    ///                   esperando una reclamacion.
     /// </summary>
     Task<int> ContarNovedadesAbiertasAsync(
         int transferenciaId,
-        int exceptoNovedadId,
+        int? exceptoNovedadId = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

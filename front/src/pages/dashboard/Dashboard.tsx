@@ -8,6 +8,7 @@ import {
   Truck,
 } from 'lucide-react';
 import { useSede } from '../../hooks/useSede';
+import { useAuth } from '../../hooks/useAuth';
 import { useConsulta } from '../../hooks/useConsulta';
 import { obtenerResumenGeneral } from '../../services/dashboard';
 import { obtenerLotesProximosAVencer } from '../../services/inventario';
@@ -15,6 +16,9 @@ import type { ResumenGeneralDto } from '../../models/dashboard';
 import type { LoteDto } from '../../models/inventario';
 import { TarjetaKpi } from '../../components/dashboard/TarjetaKpi';
 import { TablaAlertasVencimiento } from '../../components/dashboard/TablaAlertasVencimiento';
+import { HistoricoVentas } from '../../components/dashboard/HistoricoVentas';
+import { RotacionProductos } from '../../components/dashboard/RotacionProductos';
+import { ComparativaSucursales } from '../../components/dashboard/ComparativaSucursales';
 import { Alerta } from '../../components/ui/Alerta';
 import { CargandoPanel } from '../../components/ui/Spinner';
 import {
@@ -34,6 +38,7 @@ const VACIO: DatosPanel = { resumen: null, lotes: [] };
 
 export function Dashboard() {
   const { sedeActiva, nombreSedeActiva } = useSede();
+  const { esSupervision } = useAuth();
 
   const { datos, cargando, error, esPermisos } = useConsulta<DatosPanel>(
     async () => {
@@ -131,6 +136,21 @@ export function Dashboard() {
           tono={resumen.ordenesParcialmenteRecibidas > 0 ? 'alerta' : 'neutro'}
         />
       </div>
+
+      {/*
+        Cada bloque pide sus propios datos y maneja su propia carga, en vez de
+        engordar la consulta de arriba. Son consultas agregadas y pesadas: si
+        fueran juntas, la pantalla entera se quedaría en blanco esperando a la
+        más lenta, y hoy los KPI aparecen en cuanto responde el resumen.
+      */}
+      <HistoricoVentas />
+
+      <RotacionProductos />
+
+      {/* La comparativa es SOLO de administración y gerencia. Esto no es el
+          control -la API responde 403 al operario y el servicio lo vuelve a
+          comprobar-: es no pedir algo que va a fallar. */}
+      {esSupervision ? <ComparativaSucursales /> : null}
 
       <TablaAlertasVencimiento lotes={lotes} diasUmbral={resumen.diasUmbralVencimiento} />
 

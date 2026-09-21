@@ -168,8 +168,10 @@ public class AppDbContext : DbContext
             e.Property(x => x.Rol).HasColumnName("rol")
              .HasConversion(RolUsuarioConverter).HasColumnType(EnumRolUsuario).IsRequired();
             e.Property(x => x.SucursalId).HasColumnName("sucursal_id");
+            e.Property(x => x.Activo).HasColumnName("activo").IsRequired();
 
             e.HasIndex(x => x.Email).IsUnique().HasDatabaseName("uq_usuarios_email");
+            e.HasIndex(x => x.Activo).HasDatabaseName("idx_usuarios_activo");
 
             // Nombre explicito del indice de la clave foranea. EF lo crearia
             // igual, pero llamandolo IX_usuarios_sucursal_id, mientras que la
