@@ -713,7 +713,10 @@ public class AppDbContext : DbContext
     {
         modelBuilder.Entity<Transportadora>(e =>
         {
-            e.ToTable("transportadoras");
+            // Un plazo de cero dias no describe a nadie que necesite camion.
+            e.ToTable("transportadoras", t => t.HasCheckConstraint(
+                "chk_transportadoras_dias_entrega",
+                "`dias_entrega` >= 1"));
             e.HasKey(x => x.Id);
 
             e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
@@ -722,6 +725,10 @@ public class AppDbContext : DbContext
              .HasColumnName("tipo_servicio")
              .HasConversion(TipoServicioConverter)
              .HasColumnType(EnumTipoServicio)
+             .IsRequired();
+            e.Property(x => x.DiasEntrega)
+             .HasColumnName("dias_entrega")
+             .HasColumnType("tinyint unsigned")
              .IsRequired();
         });
 

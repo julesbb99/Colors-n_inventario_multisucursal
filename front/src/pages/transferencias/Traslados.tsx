@@ -47,21 +47,79 @@ const ABIERTOS: readonly EstadoTransferencia[] = ['Solicitada', 'EnTransito', 'R
 
 const SIN_DATOS: TransferenciaDto[] = [];
 
-/** Qué acciones admite un traslado según en qué punto de su ciclo está. */
+/** Quién está mirando la tabla. Decide qué acciones se le ofrecen. */
+interface QuienMira {
+  usuarioId: number | null;
+  /** Sede del token. `null` en el Administrador General: significa TODAS. */
+  sedePropia: number | null;
+  esAdminGeneral: boolean;
+}
+
+/**
+ * Qué acciones admite un traslado según su estado Y QUIÉN ESTÁ MIRANDO.
+ *
+ * ANTES SOLO MIRABA EL ESTADO Y EL ROL, y ese era el fallo: a un traslado
+ * Solicitada se le ofrecía «Despachar» a cualquiera, así que la sede DESTINO
+ * -la que pidió el producto- veía el botón de despachar mercancía que no tiene.
+ * La API lo rechazaba con 403, pero ofrecer un botón que va a fallar es peor que
+ * no ofrecerlo: parece que la acción es tuya y no lo es.
+ *
+ * CADA ACCIÓN MIRA UN LADO DISTINTO, y es la misma regla que ya aplica la API:
+ *
+ *   despachar   el ORIGEN: el stock sale de su bodega
+ *   rechazar    el ORIGEN: es quien decide no atender la petición
+ *   recibir     el DESTINO: es donde entra la mercancía
+ *   cancelar    QUIEN LA PIDIÓ: es su petición y aún no se ha movido nada
+ *   novedad     cualquiera de las dos: el daño se ve al cargar o al descargar
+ *
+ * El Administrador General no tiene sede propia y las alcanza todas.
+ */
 function accionesDisponibles(
   traslado: TransferenciaDto,
-  esSupervision: boolean,
+  quien: QuienMira,
 ): AccionTraslado[] {
+  const suSede = (sucursalId: number) =>
+    quien.esAdminGeneral || sucursalId === quien.sedePropia;
+
+  const enElOrigen = suSede(traslado.sucursalOrigenId);
+  const enElDestino = suSede(traslado.sucursalDestinoId);
+  // Cancelar es retirar UNA PETICIÓN PROPIA, no cerrar el documento de otro. Por
+  // eso va por persona y no por sede: en una misma bodega, quien pidió el
+  // traslado es quien sabe si ya no hace falta.
+  const laPidioQuienMira =
+    quien.usuarioId !== null && traslado.usuarioId === quien.usuarioId;
+
   if (traslado.estado === 'Solicitada') {
-    // Rechazo y cancelación cierran el documento: solo supervisión.
-    return esSupervision ? ['despacho', 'rechazo', 'cancelacion'] : ['despacho'];
+    const acciones: AccionTraslado[] = [];
+    if (enElOrigen) {
+      // Aceptarla es despacharla. Rechazarla es decir que no se atiende. Las
+      // dos son del origen y las dos las puede hacer quien atiende la bodega.
+      acciones.push('despacho', 'rechazo');
+    }
+    if (laPidioQuienMira || quien.esAdminGeneral) {
+      acciones.push('cancelacion');
+    }
+    return acciones;
   }
+
+  // UN SOLO BOTÓN, Y SOLO PARA EL DESTINO.
+  //
+  // Antes había dos -«Recibir» y «Novedad»- y los veían las dos sedes. Sobraba
+  // uno: lo que faltó o llegó dañado se anota DENTRO de la recepción, en el
+  // mismo paso en que se cuenta lo que llegó, así que un botón aparte invitaba
+  // a hacerlo en dos sitios. Y el origen no tiene nada que anotar: no ve la
+  // mercancía llegar.
   if (traslado.estado === 'EnTransito') {
-    return ['recepcion', 'novedad'];
+    return enElDestino ? ['recepcion'] : [];
   }
+
+  // Ya se recibió, pero llegó corto. Queda dejar constancia de lo que pasó con
+  // el faltante: si apareció, si lo respondió la transportadora, si se da por
+  // perdido. Sigue siendo cosa del destino, que es quien lo tiene delante.
   if (traslado.estado === 'RecibidaParcial') {
-    return ['novedad'];
+    return enElDestino ? ['novedad'] : [];
   }
+
   // Completada, Rechazada y Cancelada están cerradas: no admiten nada más.
   return [];
 }
@@ -69,13 +127,16 @@ function accionesDisponibles(
 const ETIQUETA_ACCION: Record<AccionTraslado, string> = {
   despacho: 'Despachar',
   recepcion: 'Recibir',
-  novedad: 'Novedad',
+  // «Recibir» y no «Novedad»: en la bodega esto no es reportar una incidencia,
+  // es terminar de revisar lo que llegó. Nunca convive con el de arriba porque
+  // los dos estados son excluyentes.
+  novedad: 'Recibir',
   rechazo: 'Rechazar',
   cancelacion: 'Cancelar',
 };
 
 function construirColumnas(
-  esSupervision: boolean,
+  quien: QuienMira,
   onAccion: (traslado: TransferenciaDto, accion: AccionTraslado) => void,
 ): ColumnaTabla<TransferenciaDto>[] {
   const columnas: ColumnaTabla<TransferenciaDto>[] = [
@@ -174,7 +235,7 @@ function construirColumnas(
     header: '',
     align: 'derecha',
     render: (traslado) => {
-      const acciones = accionesDisponibles(traslado, esSupervision);
+      const acciones = accionesDisponibles(traslado, quien);
 
       if (acciones.length === 0) {
         return <span className="text-slate-400">—</span>;
@@ -208,7 +269,7 @@ interface Pendiente {
 
 export function Traslados() {
   const { sedeActiva, nombreSedeActiva } = useSede();
-  const { esSupervision } = useAuth();
+  const { sesion, sucursalId: sedePropia, esAdminGeneral } = useAuth();
   const [pestana, setPestana] = useState<Pestana>('todos');
   const [solicitando, setSolicitando] = useState(false);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
@@ -221,12 +282,17 @@ export function Traslados() {
     recargar,
   } = useConsulta(() => obtenerTransferencias(sedeActiva), [sedeActiva], SIN_DATOS);
 
+  const quien = useMemo<QuienMira>(
+    () => ({ usuarioId: sesion?.usuarioId ?? null, sedePropia, esAdminGeneral }),
+    [sesion?.usuarioId, sedePropia, esAdminGeneral],
+  );
+
   const columnas = useMemo(
     () =>
-      construirColumnas(esSupervision, (traslado, accion) =>
+      construirColumnas(quien, (traslado, accion) =>
         setPendiente({ traslado, accion }),
       ),
-    [esSupervision],
+    [quien],
   );
 
   const conteos = useMemo(

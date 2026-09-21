@@ -46,16 +46,24 @@ export const TIPO_NOVEDAD = {
 } as const;
 export type ValorTipoNovedad = (typeof TIPO_NOVEDAD)[keyof typeof TIPO_NOVEDAD];
 
-/** Una novedad critica solo la puede registrar supervision; la API responde 403 al operador. */
-export const NOVEDADES_CRITICAS: readonly ValorTipoNovedad[] = [
-  TIPO_NOVEDAD.faltante,
-  TIPO_NOVEDAD.averia,
-];
+// Aquí estaba NOVEDADES_CRITICAS, la lista de las que solo podía registrar
+// supervisión. Ya no existe esa distinción: una novedad no mueve stock, es el
+// testimonio de quien descargó, y exigirle rango solo conseguía que el faltante
+// lo anotara -tarde- alguien que no estuvo en la descarga.
 
 export interface TransportadoraDto {
   id: number;
   nombre: string;
+  /** 'urgente' o 'estandar', en minúscula, como el ENUM de la base. */
   tipoServicio: string;
+  /**
+   * Días que tarda en entregar. Es lo que convierte la etiqueta del servicio en
+   * una fecha: al elegirla en el despacho, la llegada estimada se calcula sola.
+   *
+   * Va por transportadora y no por tipo de servicio porque «urgente» es una
+   * etiqueta comercial, no un plazo: dos urgentes pueden tardar 1 y 2 días.
+   */
+  diasEntrega: number;
 }
 
 /** Un movimiento de inventario ligado al traslado: la salida del origen o la entrada al destino. */
@@ -124,6 +132,13 @@ export interface DespacharTransferenciaDto {
   transferenciaId: number;
   transportadoraId: number;
   guia: string;
+  /**
+   * OBLIGATORIA. La API responde 400 si falta o si es anterior a hoy.
+   *
+   * Sigue declarada como opcional en el tipo porque el campo del formulario
+   * empieza vacío y se rellena al elegir transportadora; lo que no se admite es
+   * enviarla vacía.
+   */
   fechaEstimadaLlegada?: string | null;
   observaciones?: string | null;
 }

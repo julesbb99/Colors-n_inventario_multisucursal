@@ -212,6 +212,34 @@ public sealed class TransferenciasService : ITransferenciasService
                 $"No existe la transportadora {peticion.TransportadoraId}.");
         }
 
+        // LA FECHA ESTIMADA ES OBLIGATORIA, y antes no lo era.
+        //
+        // Un traslado EnTransito sin fecha de llegada no se puede reclamar: no
+        // hay a partir de cuando decir que va tarde, ni con que comparar cuando
+        // llegue. La pantalla la calcula sola con los dias de la transportadora,
+        // asi que exigirla no le anade trabajo a nadie; lo que evita es que otra
+        // via de entrada vuelva a dejarla vacia.
+        if (peticion.FechaEstimadaLlegada is not DateTime estimada)
+        {
+            return ResultadoTransferencia.Fallo(
+                ErrorTransferencia.FechaEstimadaNoIndicada,
+                "Hay que indicar la fecha estimada de llegada: es con lo que se sabe si el " +
+                "traslado va tarde. Se calcula sumando los dias de entrega de la " +
+                "transportadora a la fecha de despacho.");
+        }
+
+        // Una llegada anterior al despacho solo puede ser un error de digitacion,
+        // y deja un traslado que nace tarde. Se compara contra el dia, no contra
+        // el instante, para que despachar a las 6 de la tarde con llegada "hoy"
+        // -mismo dia, servicio de una hora- siga valiendo.
+        if (estimada.Date < DateTime.Now.Date)
+        {
+            return ResultadoTransferencia.Fallo(
+                ErrorTransferencia.FechaEstimadaInvalida,
+                $"La fecha estimada de llegada ({estimada:yyyy-MM-dd}) es anterior a hoy. " +
+                "Un traslado no puede llegar antes de salir.");
+        }
+
         return await _transferencias.EjecutarEnTransaccionAsync(
             ct => DespacharEnTransaccionAsync(peticion, usuarioId, ct),
             cancellationToken);

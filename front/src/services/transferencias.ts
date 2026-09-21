@@ -86,23 +86,35 @@ export async function recibirTransferencia(id: number, peticion: RecibirTransfer
   return data;
 }
 
-/** Solo el ORIGEN y solo desde 'Solicitada'. Restringido a supervision. */
+/**
+ * El ORIGEN dice que no atiende la peticion. Solo desde 'Solicitada'.
+ *
+ * Cualquier rol de esa sede: aceptar -despachar- y rechazar son la misma
+ * decision vista desde los dos lados, y quien mira el estante es quien sabe si
+ * hay producto. No mueve stock.
+ */
 export async function rechazarTransferencia(id: number, peticion: CierreTransferenciaDto = {}) {
   const { data } = await axiosInstance.post(`${RUTA}/${id}/rechazo`, peticion);
   return data;
 }
 
-/** Cualquiera de las dos sedes, solo desde 'Solicitada'. Restringido a supervision. */
+/**
+ * Retira la peticion. Solo desde 'Solicitada'.
+ *
+ * La cancela QUIEN LA PIDIO, sea cual sea su rol: es su peticion y aun no se ha
+ * movido nada. Otro usuario recibe 403 salvo que sea supervision.
+ */
 export async function cancelarTransferencia(id: number, peticion: CierreTransferenciaDto = {}) {
   const { data } = await axiosInstance.post(`${RUTA}/${id}/cancelacion`, peticion);
   return data;
 }
 
 /**
- * Reportar una novedad. No mueve stock.
+ * Reportar una novedad. NO MUEVE STOCK, y en el faltante eso es lo importante:
+ * lo que salio del origen y nunca llego ya esta descontado de la red, asi que
+ * esta anotacion lo deja registrado como merma sin restarlo por segunda vez.
  *
- * `Faltante` y `Averia` son criticas y solo las admite supervision: a un
- * operador la API le responde 403 aunque el endpoint sea el mismo.
+ * Abierta a cualquier rol de las dos sedes del traslado.
  */
 export async function registrarNovedad(id: number, peticion: RegistrarNovedadDto) {
   const { data } = await axiosInstance.post(`${RUTA}/${id}/novedades`, peticion);

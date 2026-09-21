@@ -50,6 +50,18 @@ public enum ErrorTransferencia
     /// <summary>Falta el numero de guia.</summary>
     GuiaNoIndicada,
 
+    /// <summary>
+    /// Falta la fecha estimada de llegada.
+    ///
+    /// Es obligatoria desde que las transportadoras declaran sus dias de
+    /// entrega: sin ella no hay a partir de cuando decir que el traslado va
+    /// tarde, ni con que comparar cuando llegue.
+    /// </summary>
+    FechaEstimadaNoIndicada,
+
+    /// <summary>La fecha estimada de llegada es anterior a hoy.</summary>
+    FechaEstimadaInvalida,
+
     /// <summary>El traslado no esta en un estado que admita esta operacion.</summary>
     EstadoNoPermiteOperacion,
 

@@ -179,7 +179,10 @@ public static class TransferenciasEndpoints
             .WithDescription(
                 "Valida disponibilidad, descuenta el saldo del origen repartiendolo entre sus " +
                 "lotes por FEFO, anexa un movimiento de Retiro por lote, asigna transportadora y " +
-                "guia, y pasa el traslado a 'EnTransito'. Todo o nada.")
+                "guia, y pasa el traslado a 'EnTransito'. Todo o nada. " +
+                "`fechaEstimadaLlegada` es OBLIGATORIA y no puede ser anterior a hoy: sin ella no " +
+                "hay a partir de cuando decir que el traslado va tarde. La pantalla la calcula " +
+                "sumando `diasEntrega` de la transportadora a la fecha de despacho.")
             .Produces<ResultadoTransferencia>();
 
         grupo.MapPost("/{id:int}/recepcion", async (
@@ -234,16 +237,25 @@ public static class TransferenciasEndpoints
                 return Responder(resultado, "Rechazo no aplicado");
             })
             .WithName("TransferenciasRechazar")
-            .WithSummary("La sede origen no atiende el traslado. Solo supervision.")
+            .WithSummary("La sede origen no atiende el traslado. Cualquier rol, en el origen.")
             .WithDescription(
                 "Solo desde 'Solicitada'. Despues del despacho la mercancia ya salio y anularlo " +
                 "dejaria stock sin dueno. " +
-                "Restringido a Administrador General y Gerente de Sucursal.")
-            .Produces<ResultadoTransferencia>()
-            // Rechazar es decidir que otra sede se quede sin el producto que
-            // pidio. Eso es la "aprobacion de traslados" de la especificacion:
-            // no una tarea de bodega, sino una decision sobre a quien se atiende.
-            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+                "ABIERTO AL OPERADOR DEL ORIGEN: aceptar y rechazar son la misma decision vista " +
+                "desde los dos lados, y aceptar -despachar- siempre estuvo abierta. No mueve stock.")
+            .Produces<ResultadoTransferencia>();
+            // SIN politica de supervision, al contrario que antes.
+            //
+            // La razon por la que estaba: se leyo como la "aprobacion de
+            // traslados" de la especificacion, una decision sobre a quien se
+            // atiende. El problema practico es que la decision contraria
+            // -aceptar, o sea despachar- nunca exigio supervision, asi que el
+            // operador del origen podia entregar la mercancia pero no decir que
+            // no podia. Quien mira el estante y ve que no hay es el, y sin esto
+            // la peticion se quedaba abierta hasta que pasara un gerente.
+            //
+            // Lo que SIGUE protegiendo: el eje de sede, comprobado arriba, y el
+            // estado, comprobado en el servicio. Un rechazo no toca stock.
 
         grupo.MapPost("/{id:int}/cancelacion", async (
                 int id,
@@ -261,19 +273,37 @@ public static class TransferenciasEndpoints
                 contexto.ExigirAccesoAAlgunaDe(
                     traslado.SucursalOrigenId, traslado.SucursalDestinoId);
 
+                var usuarioId = contexto.UsuarioIdRequerido();
+
+                // CANCELAR ES RETIRAR UNA PETICION PROPIA, no cerrar el
+                // documento de otro. Por eso la comprobacion es por PERSONA y no
+                // solo por sede: en una misma bodega, quien pidio el traslado es
+                // quien sabe si dejo de hacer falta, y no tiene por que poder
+                // retirar lo que pidio un companero.
+                //
+                // Supervision sigue pudiendo con cualquiera, porque responde por
+                // la sede y alguien tiene que poder cerrar la peticion de quien
+                // ya no esta.
+                if (traslado.UsuarioId != usuarioId && !RolesColorsin.EsSupervision(contexto.Rol))
+                {
+                    throw new AccesoDenegadoException(
+                        $"El usuario {usuarioId} (rol '{contexto.Rol}') intento cancelar el " +
+                        $"traslado {id}, que solicito el usuario {traslado.UsuarioId}.");
+                }
+
                 var resultado = await transferencias.CancelarAsync(
-                    id, contexto.UsuarioIdRequerido(), peticion?.Motivo, cancellationToken);
+                    id, usuarioId, peticion?.Motivo, cancellationToken);
 
                 return Responder(resultado, "Cancelacion no aplicada");
             })
             .WithName("TransferenciasCancelar")
-            .WithSummary("Anula un traslado antes de despacharlo. Solo supervision.")
+            .WithSummary("Anula un traslado antes de despacharlo. Quien lo pidio, o supervision.")
             .WithDescription(
                 "Solo desde 'Solicitada', por la misma razon que el rechazo. " +
-                "Restringido a Administrador General y Gerente de Sucursal.")
-            .Produces<ResultadoTransferencia>()
-            // Misma naturaleza que el rechazo: cierra el documento sin atenderlo.
-            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+                "ABIERTO A QUIEN LO SOLICITO, sea cual sea su rol: es su peticion y todavia no se " +
+                "ha movido nada. Otro usuario de la misma sede recibe 403 salvo que sea " +
+                "supervision, que si puede cerrar la peticion de cualquiera.")
+            .Produces<ResultadoTransferencia>();
 
         // ---------------------------------------------------------------------
         // Novedades
@@ -293,18 +323,22 @@ public static class TransferenciasEndpoints
                 contexto.ExigirAccesoAAlgunaDe(
                     traslado.SucursalOrigenId, traslado.SucursalDestinoId);
 
-                // Las novedades CRITICAS quedan reservadas a supervision. La
-                // comprobacion va aqui dentro y no como politica del endpoint
-                // porque depende del CUERPO de la peticion: el mismo endpoint
-                // admite a un operador reportando un retraso y le niega declarar
-                // un faltante.
-                if (EsCritica(peticion.Tipo) && !RolesColorsin.EsSupervision(contexto.Rol))
-                {
-                    throw new AccesoDenegadoException(
-                        $"El usuario {contexto.UsuarioId} (rol '{contexto.Rol}') intento registrar " +
-                        $"una novedad de tipo {peticion.Tipo} en el traslado {id}.");
-                }
-
+                // AQUI ESTABA LA RESTRICCION que reservaba Faltante y Averia a
+                // supervision. Se quito, y conviene dejar escrito por que.
+                //
+                // Una novedad NO MUEVE STOCK: es el testimonio de lo que se vio
+                // al abrir las cajas. Quien las abre es el operador, asi que
+                // exigirle rango para declarar un faltante solo conseguia que el
+                // faltante no se anotara -o que lo anotara, horas despues, quien
+                // no estuvo en la descarga-.
+                //
+                // En un traslado que llega corto ademas era contradictorio: el
+                // operador del destino SI podia registrar la recepcion parcial,
+                // que es la que de verdad decide cuanto entra al saldo, y no
+                // podia dejar constancia de lo que falto.
+                //
+                // Lo que sigue protegiendo: el eje de sede, comprobado arriba.
+                // Nadie deja novedades en traslados ajenos.
                 var resultado = await transferencias.RegistrarNovedadAsync(
                     peticion with { TransferenciaId = id },
                     contexto.UsuarioIdRequerido(),
@@ -322,28 +356,19 @@ public static class TransferenciasEndpoints
                 "a proposito: lo que ajusta el saldo es la cantidad que declare el destino al " +
                 "recibir. Se puede registrar en cualquier estado, incluso despues de cerrado: los " +
                 "danos se descubren al abrir las cajas. " +
-                "Faltante y Averia son CRITICAS y las reserva supervision; Sobrante y Retraso las " +
-                "puede reportar cualquiera. Un operador que intente una critica recibe 403.")
+                "ABIERTA A CUALQUIER ROL de las dos sedes del traslado: es el testimonio de quien " +
+                "descargo. El FALTANTE es ademas la forma de dejar anotada como merma la " +
+                "mercancia que salio del origen y nunca llego, que ya es una baja neta de la red.")
             .Produces<ResultadoNovedad>();
 
         return rutas;
     }
 
-    /// <summary>
-    /// Que novedades son criticas.
-    ///
-    /// Faltante y Averia porque las dos afirman que se perdio valor: preceden a
-    /// un reclamo a la transportadora y contradicen lo que dice el traslado.
-    /// Sobrante y Retraso son informativas.
-    ///
-    /// OJO CON LO QUE ESTO IMPLICA EN LA BODEGA: el operador que descarga es
-    /// quien ve la lata rota, y con esta regla no puede registrarla; tiene que
-    /// pedirselo a su gerente, y se pierde el relato de primera mano. Si en la
-    /// practica estorba, quitar la comprobacion del endpoint lo abre a todos los
-    /// roles sin tocar nada mas.
-    /// </summary>
-    private static bool EsCritica(TipoNovedad tipo) =>
-        tipo is TipoNovedad.Faltante or TipoNovedad.Averia;
+    // Aqui vivia EsCritica(), que reservaba Faltante y Averia a supervision. Su
+    // propio comentario ya avisaba de lo que pasaria en la bodega: "el operador
+    // que descarga es quien ve la lata rota, y con esta regla no puede
+    // registrarla". Eso es justo lo que estorbo, asi que se quito. El detalle
+    // esta en el endpoint de novedades.
 
     private static IResult Responder(ResultadoTransferencia resultado, string titulo) =>
         resultado.Exito
