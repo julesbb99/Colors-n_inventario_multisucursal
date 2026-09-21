@@ -27,6 +27,46 @@ public interface ITransferenciaRepository
     Task<Transferencia?> ObtenerPorIdAsync(int id, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Traslados de un periodo, con sus novedades y sus dos sedes, PARA EL
+    /// INFORME DE CUMPLIMIENTO.
+    ///
+    /// SIN TOPE DE FILAS, a diferencia de <see cref="ObtenerAsync"/>: un informe
+    /// recortado a las cien mas recientes daria los porcentajes de una muestra
+    /// arbitraria presentandolos como los del periodo. Lo que acota es el
+    /// periodo.
+    ///
+    /// <paramref name="sucursalId"/> trae los traslados en que esa sede
+    /// participa POR CUALQUIERA DE LOS DOS LADOS: lo que despacha y lo que
+    /// recibe. Filtrar solo por origen dejaria fuera la mitad de su actividad.
+    /// </summary>
+    Task<IReadOnlyList<Transferencia>> ObtenerParaReporteAsync(
+        DateTime? desde = null,
+        DateTime? hasta = null,
+        int? sucursalId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Una novedad por id, RASTREADA para poder cerrarla. <c>null</c> si no
+    /// existe.
+    /// </summary>
+    Task<NovedadTransferencia?> ObtenerNovedadParaOperarAsync(
+        int id,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Cuantas novedades de ese traslado siguen abiertas, SIN CONTAR la que se
+    /// esta cerrando ahora mismo.
+    ///
+    /// Es lo que decide si el traslado puede darse por terminado: cierra cuando
+    /// no le queda ninguna. Se excluye la actual porque en ese momento todavia
+    /// no se ha confirmado el cambio en la base.
+    /// </summary>
+    Task<int> ContarNovedadesAbiertasAsync(
+        int transferenciaId,
+        int exceptoNovedadId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Como <see cref="ObtenerPorIdAsync"/>, pero con la entidad rastreada y la
     /// fila bloqueada hasta el final de la transaccion.
     ///

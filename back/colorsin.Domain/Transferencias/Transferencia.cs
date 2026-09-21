@@ -42,8 +42,28 @@ public class Transferencia
     public decimal? CantidadSolicitada { get; set; }
 
     /// <summary>
+    /// Lo que DE VERDAD salio del origen. Nulo hasta el despacho.
+    ///
+    /// Puede ser menor que <see cref="CantidadSolicitada"/>: la sede origen
+    /// ajusta a lo que tiene en el estante. Nunca mayor -lo impide un CHECK-
+    /// porque mandar de mas seria stock que el destino no pidio.
+    ///
+    /// SON DOS FALTANTES DISTINTOS Y NO HAY QUE MEZCLARLOS:
+    ///   solicitada - despachada  lo que el origen no pudo mandar. Sigue en su
+    ///                            estante; no se perdio nada.
+    ///   despachada - recibida    lo que se perdio en el camino. Eso si es baja
+    ///                            neta de la red y es lo que se reclama.
+    /// </summary>
+    public decimal? CantidadDespachada { get; set; }
+
+    /// <summary>
     /// Nulo hasta que la sede destino confirma. Comparada con
-    /// <see cref="CantidadSolicitada"/> distingue recepcion completa de parcial.
+    /// <see cref="CantidadDespachada"/> distingue recepcion completa de parcial.
+    ///
+    /// SE COMPARA CONTRA LO DESPACHADO, NO CONTRA LO SOLICITADO: si el origen
+    /// mando 3 de los 5 que le pidieron y llegaron los 3, el traslado llego
+    /// completo. Compararlo contra los 5 lo marcaria como perdida en transito
+    /// de algo que nunca viajo.
     /// </summary>
     public decimal? CantidadRecibida { get; set; }
 
@@ -56,7 +76,20 @@ public class Transferencia
     public EstadoTransferencia? Estado { get; set; }
     public Urgencia? Urgencia { get; set; }
     public DateTime? FechaSolicitud { get; set; }
+
+    /// <summary>Cuando salio del origen. Nula mientras esta 'Solicitada'.</summary>
+    public DateTime? FechaDespacho { get; set; }
+
     public DateTime? FechaEstimadaLlegada { get; set; }
+
+    /// <summary>
+    /// Cuando la conto el destino. Nula hasta que se recibe.
+    ///
+    /// Contra <see cref="FechaEstimadaLlegada"/> dice si la transportadora
+    /// cumplio; menos <see cref="FechaDespacho"/>, el transito real. Las dos
+    /// cifras son las que alimentan el informe de cumplimiento logistico.
+    /// </summary>
+    public DateTime? FechaRecepcion { get; set; }
 
     // --- Navegacion ---
     public Producto Producto { get; set; } = null!;

@@ -128,6 +128,11 @@ public class AppDbContext : DbContext
         "'Cerrada','Rechazada','Cancelada')";
     private const string EnumUrgencia = "enum('Baja','Media','Alta')";
     private const string EnumTipoNovedad = "enum('Faltante','Averia','Sobrante','Retraso')";
+    // Sin tildes ni enes, igual que el resto de ENUM fisicos: 'Reenvio' y
+    // 'Reclamacion'. La interfaz si los muestra acentuados.
+    private const string EnumTratamientoNovedad =
+        "enum('Ninguno','Reenvio','Reclamacion','Asumido')";
+    private const string EnumEstadoNovedad = "enum('Abierta','Cerrada')";
     private const string EnumTipoMovimiento = "enum('Ingreso','Retiro')";
     private const string EnumMotivoMovimiento =
         "enum('Compra','Venta','Ajuste','Transferencia','Merma','Devolucion')";
@@ -744,6 +749,13 @@ public class AppDbContext : DbContext
                 t.HasCheckConstraint("chk_transf_cantidades",
                     "(`cantidad_solicitada` IS NULL OR `cantidad_solicitada` > 0) " +
                     "AND (`cantidad_recibida` IS NULL OR `cantidad_recibida` >= 0)");
+                // El ajuste del origen solo va hacia abajo: mandar de mas seria
+                // stock que el destino no pidio y que su bodega no espera.
+                t.HasCheckConstraint("chk_transf_despachada",
+                    "`cantidad_despachada` IS NULL " +
+                    "OR (`cantidad_despachada` > 0 " +
+                    "AND (`cantidad_solicitada` IS NULL " +
+                    "OR `cantidad_despachada` <= `cantidad_solicitada`))");
             });
             e.HasKey(x => x.Id);
 
@@ -757,6 +769,7 @@ public class AppDbContext : DbContext
             e.Property(x => x.TransportadoraId).HasColumnName("transportadora_id");
             e.Property(x => x.Guia).HasColumnName("guia").HasMaxLength(50);
             e.Property(x => x.CantidadSolicitada).HasColumnName("cantidad_solicitada").HasPrecision(14, 4);
+            e.Property(x => x.CantidadDespachada).HasColumnName("cantidad_despachada").HasPrecision(14, 4);
             e.Property(x => x.CantidadRecibida).HasColumnName("cantidad_recibida").HasPrecision(14, 4);
             e.Property(x => x.UnidadId).HasColumnName("unidad_id").IsRequired();
             e.Property(x => x.Estado).HasColumnName("estado")
@@ -765,7 +778,11 @@ public class AppDbContext : DbContext
              .HasConversion<string>().HasColumnType(EnumUrgencia);
             e.Property(x => x.FechaSolicitud).HasColumnName("fecha_solicitud")
              .HasColumnType("datetime").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            e.Property(x => x.FechaDespacho).HasColumnName("fecha_despacho")
+             .HasColumnType("datetime");
             e.Property(x => x.FechaEstimadaLlegada).HasColumnName("fecha_estimada_llegada")
+             .HasColumnType("datetime");
+            e.Property(x => x.FechaRecepcion).HasColumnName("fecha_recepcion")
              .HasColumnType("datetime");
 
             e.HasIndex(x => new { x.SucursalDestinoId, x.Estado }).HasDatabaseName("idx_transf_destino_estado");
@@ -820,9 +837,18 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<NovedadTransferencia>(e =>
         {
-            e.ToTable("novedades_transferencia", t => t.HasCheckConstraint(
-                "chk_novtransf_cantidad",
-                "`cantidad_afectada` IS NULL OR `cantidad_afectada` >= 0"));
+            e.ToTable("novedades_transferencia", t =>
+            {
+                t.HasCheckConstraint(
+                    "chk_novtransf_cantidad",
+                    "`cantidad_afectada` IS NULL OR `cantidad_afectada` >= 0");
+                // Abierta significa "queda algo por esperar". Sin tratamiento
+                // pendiente no hay nada que esperar, y quedaria un pendiente
+                // que nadie sabria como cerrar.
+                t.HasCheckConstraint(
+                    "chk_novtransf_abierta_con_tratamiento",
+                    "`estado` = 'Cerrada' OR `tratamiento` IN ('Reenvio','Reclamacion')");
+            });
             e.HasKey(x => x.Id);
 
             e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
@@ -831,6 +857,13 @@ public class AppDbContext : DbContext
             e.Property(x => x.Tipo).HasColumnName("tipo")
              .HasConversion<string>().HasColumnType(EnumTipoNovedad);
             e.Property(x => x.CantidadAfectada).HasColumnName("cantidad_afectada").HasPrecision(14, 4);
+            e.Property(x => x.Tratamiento).HasColumnName("tratamiento")
+             .HasConversion<string>().HasColumnType(EnumTratamientoNovedad).IsRequired();
+            e.Property(x => x.Estado).HasColumnName("estado")
+             .HasConversion<string>().HasColumnType(EnumEstadoNovedad).IsRequired();
+            e.Property(x => x.MotivoCierre).HasColumnName("motivo_cierre").HasColumnType("text");
+            e.Property(x => x.FechaCierre).HasColumnName("fecha_cierre").HasColumnType("datetime");
+            e.Property(x => x.UsuarioCierreId).HasColumnName("usuario_cierre_id");
             e.Property(x => x.Observaciones).HasColumnName("observaciones").HasColumnType("text");
             e.Property(x => x.Fecha).HasColumnName("fecha")
              .HasColumnType("datetime").HasDefaultValueSql("CURRENT_TIMESTAMP");
@@ -838,6 +871,7 @@ public class AppDbContext : DbContext
             e.HasIndex(x => x.TransferenciaId).HasDatabaseName("idx_novtransf_transferencia");
             e.HasIndex(x => x.UsuarioId).HasDatabaseName("idx_novtransf_usuario");
             e.HasIndex(x => x.Tipo).HasDatabaseName("idx_novtransf_tipo");
+            e.HasIndex(x => x.Estado).HasDatabaseName("idx_novtransf_estado");
 
             // La novedad pertenece al traslado, pero conserva a su reportante.
             e.HasOne(x => x.Transferencia)
@@ -850,6 +884,15 @@ public class AppDbContext : DbContext
              .WithMany(u => u.NovedadesReportadas)
              .HasForeignKey(x => x.UsuarioId)
              .HasConstraintName("fk_novtransf_usuario")
+             .OnDelete(DeleteBehavior.Restrict);
+
+            // Quien la cerro. Sin coleccion inversa en Usuario: ninguna consulta
+            // pregunta "que novedades cerro esta persona", y anadirla obligaria
+            // a distinguirla de NovedadesReportadas en cada uso.
+            e.HasOne(x => x.UsuarioCierre)
+             .WithMany()
+             .HasForeignKey(x => x.UsuarioCierreId)
+             .HasConstraintName("fk_novtransf_usuario_cierre")
              .OnDelete(DeleteBehavior.Restrict);
         });
     }

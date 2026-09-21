@@ -300,9 +300,14 @@ public static class TransferenciasEndpoints
                 "Valida disponibilidad, descuenta el saldo del origen repartiendolo entre sus " +
                 "lotes por FEFO, anexa un movimiento de Retiro por lote, asigna transportadora y " +
                 "guia, y pasa el traslado a 'EnTransito'. Todo o nada. " +
+                "`cantidadDespachada` AJUSTA LO QUE DE VERDAD SALE cuando el origen no tiene todo " +
+                "lo pedido: piden 5, hay 3, se mandan 3. Omitida despacha lo solicitado; mayor " +
+                "que lo solicitado se rechaza, porque el ajuste solo va hacia abajo. La " +
+                "diferencia NO es una perdida: esa mercancia nunca salio. " +
                 "`fechaEstimadaLlegada` es OBLIGATORIA y no puede ser anterior a hoy: sin ella no " +
-                "hay a partir de cuando decir que el traslado va tarde. La pantalla la calcula " +
-                "sumando `diasEntrega` de la transportadora a la fecha de despacho.")
+                "hay a partir de cuando decir que el traslado va tarde, y ademas es la que " +
+                "habilita la recepcion. La pantalla la calcula sumando `diasEntrega` de la " +
+                "transportadora a la fecha de despacho.")
             .Produces<ResultadoTransferencia>();
 
         grupo.MapPost("/{id:int}/recepcion", async (
@@ -333,7 +338,11 @@ public static class TransferenciasEndpoints
                 "Sube el saldo del destino y recrea alli los lotes que salieron del origen, con " +
                 "su mismo numero y vencimiento, para no perder la trazabilidad del fabricante. " +
                 "Sin `cantidadRecibida` se da por recibido todo lo despachado; con menos, el " +
-                "traslado queda 'RecibidaParcial' y la diferencia se da por perdida en transito.")
+                "traslado queda 'RecibidaParcial' y la diferencia se da por perdida en transito. " +
+                "SE COMPARA CONTRA LO DESPACHADO, no contra lo solicitado: si el origen ajusto el " +
+                "envio a 3 de los 5 pedidos y llegaron los 3, el traslado llego COMPLETO. " +
+                "NO SE PUEDE RECIBIR ANTES DE `fechaEstimadaLlegada`: responde 409 hasta ese dia, " +
+                "para todos los roles.")
             .Produces<ResultadoTransferencia>();
 
         grupo.MapPost("/{id:int}/rechazo", async (
@@ -472,14 +481,98 @@ public static class TransferenciasEndpoints
             .WithName("TransferenciasRegistrarNovedad")
             .WithSummary("Deja constancia de un hallazgo sobre el traslado")
             .WithDescription(
-                "Tipos: Faltante, Averia, Sobrante, Retraso. NO mueve stock ni cambia el estado, " +
-                "a proposito: lo que ajusta el saldo es la cantidad que declare el destino al " +
-                "recibir. Se puede registrar en cualquier estado, incluso despues de cerrado: los " +
-                "danos se descubren al abrir las cajas. " +
+                "Tipos: Faltante, Averia, Sobrante, Retraso. NO MUEVE STOCK: lo que ajusta el " +
+                "saldo es la cantidad que declare el destino al recibir. " +
+                "EL TRATAMIENTO decide el estado del traslado: 'Reenvio' y 'Reclamacion' dejan la " +
+                "novedad ABIERTA y el traslado sigue por recibir hasta que se cierre; 'Ninguno' y " +
+                "'Asumido' no esperan nada, y un traslado en 'RecibidaParcial' pasa a 'Cerrada'. " +
+                "Se puede registrar en cualquier estado, incluso despues de cerrado: los danos se " +
+                "descubren al abrir las cajas. " +
                 "ABIERTA A CUALQUIER ROL de las dos sedes del traslado: es el testimonio de quien " +
-                "descargo. El FALTANTE es ademas la forma de dejar anotada como merma la " +
-                "mercancia que salio del origen y nunca llego, que ya es una baja neta de la red.")
+                "descargo.")
             .Produces<ResultadoNovedad>();
+
+        grupo.MapPost("/{id:int}/novedades/{novedadId:int}/cierre", async (
+                int id,
+                int novedadId,
+                CerrarNovedadDto? peticion,
+                ITransferenciasService transferencias,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                var traslado = await transferencias.ObtenerTransferenciaPorIdAsync(
+                    id, cancellationToken);
+
+                if (traslado is null) { return Results.NotFound(); }
+
+                contexto.ExigirAccesoAAlgunaDe(
+                    traslado.SucursalOrigenId, traslado.SucursalDestinoId);
+
+                // La novedad tiene que ser DE ESTE traslado. El servicio la
+                // busca por su id, asi que sin esta comprobacion se podria
+                // cerrar la novedad de un traslado ajeno pasando el id de uno
+                // propio en la ruta, y el control de sede de arriba no serviria
+                // de nada.
+                if (traslado.Novedades.All(n => n.Id != novedadId))
+                {
+                    return RespuestasHttp.Fallo(
+                        StatusCodes.Status404NotFound, "Novedad no encontrada",
+                        $"La novedad {novedadId} no pertenece al traslado {id}.");
+                }
+
+                var resultado = await transferencias.CerrarNovedadAsync(
+                    novedadId, peticion?.Motivo, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Ok(resultado)
+                    : RespuestasHttp.Fallo(
+                        CodigoDe(resultado.Error), "Cierre no aplicado", resultado.Mensaje);
+            })
+            .WithName("TransferenciasCerrarNovedad")
+            .WithSummary("Cierra una novedad pendiente, dejando escrito el porque")
+            .WithDescription(
+                "Es el final de un reenvio o de una reclamacion: llego lo que faltaba, la " +
+                "transportadora respondio, o se da por perdido. " +
+                "NO BORRA NADA: la novedad se conserva entera -tipo, cantidad, quien la reporto y " +
+                "cuando- y se le anade el desenlace con su motivo, su fecha y quien la cerro. " +
+                "El MOTIVO es obligatorio; sin el responde 400, porque sin el cerrar seria " +
+                "indistinguible de borrar. " +
+                "Si era la ultima pendiente y el traslado estaba en 'RecibidaParcial', pasa a " +
+                "'Cerrada'. Si le quedan otras abiertas, sigue pendiente.")
+            .Produces<ResultadoNovedad>()
+            .Produces(StatusCodes.Status404NotFound);
+
+        // ---------------------------------------------------------------------
+        // Informes
+        // ---------------------------------------------------------------------
+        grupo.MapGet("/reportes/cumplimiento", async (
+                ITransferenciasService transferencias,
+                IUsuarioContexto contexto,
+                DateTime? desde,
+                DateTime? hasta,
+                int? sucursalId,
+                CancellationToken cancellationToken) =>
+            TypedResults.Ok(await transferencias.ObtenerReporteCumplimientoAsync(
+                desde,
+                hasta,
+                // La MISMA regla de aislamiento que el resto del modulo: un
+                // gerente de Armenia no saca el informe de Cali. Sin sede, el
+                // Administrador General ve la red y los demas su propia sede.
+                contexto.ResolverFiltroSucursal(sucursalId),
+                cancellationToken)))
+            .WithName("TransferenciasReporteCumplimiento")
+            .WithSummary("Cumplimiento logistico por sucursal y por ruta")
+            .WithDescription(
+                "TODO EN CONTEOS, nunca en volumenes: cada traslado lleva su producto en su " +
+                "unidad, y sumar litros con galones daria un numero sin significado. " +
+                "TRES CUMPLIMIENTOS DISTINTOS que no se funden en uno: 'atencion' es cuantas " +
+                "peticiones despacho el origen, 'cantidad' cuantos de los recibidos llegaron " +
+                "enteros, y 'plazo' cuantos llegaron dentro de la fecha estimada. Una " +
+                "transportadora puede cumplir el plazo y perder producto en cada viaje. " +
+                "Se agrupa por la sede de ORIGEN, que es la que responde por el traslado. " +
+                "`desde` y `hasta` filtran por fecha de solicitud; sin ellas, todo el historico. " +
+                "ABIERTO A CUALQUIER ROL, acotado a su sede.")
+            .Produces<ReporteCumplimientoDto>();
 
         return rutas;
     }
@@ -515,11 +608,18 @@ public static class TransferenciasEndpoints
             or ErrorTransferencia.UnidadNoEncontrada
             or ErrorTransferencia.TransportadoraNoEncontrada
             or ErrorTransferencia.SaldoNoEncontrado
+            or ErrorTransferencia.NovedadNoEncontrada
             => StatusCodes.Status404NotFound,
 
+        // 409: la peticion esta bien formada y quien la manda tiene permiso; lo
+        // que la impide es el estado actual de los datos. La recepcion
+        // anticipada entra aqui y no en 400 por lo mismo: lo que hay mal no es
+        // lo que se mando, es el dia en que se manda.
         ErrorTransferencia.EstadoNoPermiteOperacion
             or ErrorTransferencia.StockInsuficiente
             or ErrorTransferencia.TransportadoraRetirada
+            or ErrorTransferencia.RecepcionAnticipada
+            or ErrorTransferencia.NovedadYaCerrada
             => StatusCodes.Status409Conflict,
 
         _ => StatusCodes.Status400BadRequest

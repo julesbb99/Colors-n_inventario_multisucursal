@@ -51,6 +51,45 @@ export const TIPO_NOVEDAD = {
 } as const;
 export type ValorTipoNovedad = (typeof TIPO_NOVEDAD)[keyof typeof TIPO_NOVEDAD];
 
+/**
+ * QUÉ SE VA A HACER con lo que se reportó, y con ello si el traslado cierra.
+ *
+ * Los dos del medio dejan trabajo por delante -alguien tiene que volver a
+ * mandar la mercancía, o pelear el cobro- así que la novedad queda ABIERTA y el
+ * traslado sigue «por recibir». Los otros dos no esperan nada.
+ */
+export const TRATAMIENTO_NOVEDAD = {
+  ninguno: 0,
+  reenvio: 1,
+  reclamacion: 2,
+  asumido: 3,
+} as const;
+export type ValorTratamientoNovedad =
+  (typeof TRATAMIENTO_NOVEDAD)[keyof typeof TRATAMIENTO_NOVEDAD];
+
+/** Como los serializa la API: el `ToString()` del enum del dominio. */
+export type TratamientoNovedad = 'Ninguno' | 'Reenvio' | 'Reclamacion' | 'Asumido';
+
+/** Con tilde y con eñe, que el ENUM de MySQL no lleva. */
+export const ETIQUETA_TRATAMIENTO: Record<TratamientoNovedad, string> = {
+  Ninguno: 'Solo constancia',
+  Reenvio: 'Reenvío',
+  Reclamacion: 'Reclamación',
+  Asumido: 'Asumido como merma',
+};
+
+export type EstadoNovedad = 'Abierta' | 'Cerrada';
+
+/** Tipos tal como los serializa la API, y cómo se escriben bien. */
+export type TipoNovedad = 'Faltante' | 'Averia' | 'Sobrante' | 'Retraso';
+
+export const ETIQUETA_TIPO_NOVEDAD: Record<TipoNovedad, string> = {
+  Faltante: 'Faltante',
+  Averia: 'Avería',
+  Sobrante: 'Sobrante',
+  Retraso: 'Retraso',
+};
+
 // Aquí estaba NOVEDADES_CRITICAS, la lista de las que solo podía registrar
 // supervisión. Ya no existe esa distinción: una novedad no mueve stock, es el
 // testimonio de quien descargó, y exigirle rango solo conseguía que el faltante
@@ -111,8 +150,16 @@ export interface NovedadTransferenciaDto {
   transferenciaId: number;
   usuarioId: number;
   usuarioNombre: string;
-  tipo: string | null;
+  tipo: TipoNovedad | null;
   cantidadAfectada: number | null;
+  /** Qué se decidió hacer. Reenvío y Reclamación dejan el traslado pendiente. */
+  tratamiento: TratamientoNovedad;
+  estado: EstadoNovedad;
+  /** El porqué del cierre. Nulo mientras sigue abierta. */
+  motivoCierre: string | null;
+  fechaCierre: string | null;
+  /** Quien la cerró. Suele no ser quien la reportó: entre ambas cosas pasan días. */
+  usuarioCierreNombre: string | null;
   observaciones: string | null;
   fecha: string | null;
 }
@@ -132,14 +179,30 @@ export interface TransferenciaDto {
   transportadoraNombre: string | null;
   guia: string | null;
   cantidadSolicitada: number | null;
-  /** Nula hasta que el destino la recibe. Menor que la solicitada = faltante. */
+  /**
+   * Lo que DE VERDAD salió del origen. Nula hasta el despacho.
+   *
+   * Menor que la solicitada significa que el origen no tenía todo. Esa
+   * diferencia NO es una pérdida: sigue en su estante.
+   */
+  cantidadDespachada: number | null;
+  /**
+   * Nula hasta que el destino la recibe.
+   *
+   * Se compara contra la DESPACHADA, no contra la solicitada: si mandaron 3 de
+   * los 5 pedidos y llegaron 3, el traslado llegó completo.
+   */
   cantidadRecibida: number | null;
   unidadId: number;
   unidadSimbolo: string;
   estado: EstadoTransferencia | null;
   urgencia: string | null;
   fechaSolicitud: string | null;
+  fechaDespacho: string | null;
   fechaEstimadaLlegada: string | null;
+  fechaRecepcion: string | null;
+  /** Novedades que siguen esperando desenlace. Viaja también en el listado. */
+  novedadesAbiertas: number;
   movimientos: DetalleTransferenciaDto[];
   novedades: NovedadTransferenciaDto[];
 }
@@ -165,8 +228,18 @@ export interface DespacharTransferenciaDto {
    * Sigue declarada como opcional en el tipo porque el campo del formulario
    * empieza vacío y se rellena al elegir transportadora; lo que no se admite es
    * enviarla vacía.
+   *
+   * Es además la fecha que HABILITA la recepción: hasta ese día el destino no
+   * puede recibir.
    */
   fechaEstimadaLlegada?: string | null;
+  /**
+   * Lo que de verdad se manda, cuando no es todo lo pedido.
+   *
+   * Nula despacha lo solicitado, que es el caso normal. Mayor que lo solicitado
+   * la API lo rechaza: el ajuste del origen solo va hacia abajo.
+   */
+  cantidadDespachada?: number | null;
   observaciones?: string | null;
 }
 
@@ -181,10 +254,65 @@ export interface RegistrarNovedadDto {
   transferenciaId: number;
   tipo: ValorTipoNovedad;
   cantidadAfectada?: number | null;
+  /**
+   * Número, no texto: la API espera el ordinal del enum.
+   *
+   * `reenvio` y `reclamacion` dejan la novedad abierta y el traslado sigue
+   * «por recibir»; `ninguno` y `asumido` la cierran al nacer.
+   */
+  tratamiento?: ValorTratamientoNovedad;
   observaciones?: string | null;
 }
 
 /** Motivo opcional de un rechazo o una cancelacion. */
 export interface CierreTransferenciaDto {
   motivo?: string | null;
+}
+
+/** Cierre de una novedad pendiente. El motivo es OBLIGATORIO: la API responde 400 sin él. */
+export interface CerrarNovedadDto {
+  motivo: string;
+}
+
+/**
+ * Cumplimiento logístico de un grupo de traslados: una sede, o una ruta.
+ *
+ * TODO SON CONTEOS, nunca volúmenes: cada traslado lleva su producto en su
+ * unidad, y sumar litros con galones daría un número sin significado.
+ */
+export interface CumplimientoGrupoDto {
+  clave: string;
+  etiqueta: string;
+  sucursalOrigenId: number | null;
+  sucursalDestinoId: number | null;
+  solicitados: number;
+  despachados: number;
+  rechazados: number;
+  cancelados: number;
+  enCurso: number;
+  recibidos: number;
+  completos: number;
+  parciales: number;
+  aTiempo: number;
+  tarde: number;
+  /** Despachos en que el origen mandó menos de lo pedido. No es culpa del transporte. */
+  ajustadosEnOrigen: number;
+  conNovedad: number;
+  novedadesAbiertas: number;
+  diasTransitoPromedio: number | null;
+  /** Despachados / (solicitados − cancelados). Mide a la BODEGA. */
+  cumplimientoAtencion: number | null;
+  /** Completos / recibidos. Mide al TRANSPORTE en mercancía. */
+  cumplimientoCantidad: number | null;
+  /** A tiempo / recibidos con plazo. Mide al TRANSPORTE en tiempo. */
+  cumplimientoPlazo: number | null;
+}
+
+export interface ReporteCumplimientoDto {
+  desde: string | null;
+  hasta: string | null;
+  total: CumplimientoGrupoDto;
+  /** Una fila por sede, contando lo que DESPACHA: es quien responde por el traslado. */
+  porSucursal: CumplimientoGrupoDto[];
+  porRuta: CumplimientoGrupoDto[];
 }

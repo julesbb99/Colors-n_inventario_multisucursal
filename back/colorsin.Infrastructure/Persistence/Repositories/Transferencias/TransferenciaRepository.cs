@@ -26,8 +26,17 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
         int limite = 100,
         CancellationToken cancellationToken = default)
     {
-        // Sin novedades ni movimientos: este metodo alimenta listados, y
-        // cargarlos por fila convertiria una consulta en muchas.
+        // SIN MOVIMIENTOS pero CON NOVEDADES, y la asimetria es deliberada.
+        //
+        // Los movimientos son el libro mayor: un traslado puede tener uno por
+        // lote de salida y otro por lote de entrada, y cargarlos para cien
+        // filas trae cientos de renglones que el listado no pinta.
+        //
+        // Las novedades si las pinta: la columna de la tabla muestra el TIPO y
+        // la cantidad afectada de cada una, no un contador, y ademas hay que
+        // saber cuales siguen abiertas para ofrecer el cierre. Son pocas por
+        // traslado -lo normal es ninguna o una- asi que el join cuesta poco y
+        // la alternativa seria una consulta por fila.
         var consulta = _db.Transferencias
             .AsNoTracking()
             .Include(t => t.Producto)
@@ -36,6 +45,13 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
             .Include(t => t.Transportadora)
             .Include(t => t.Unidad)
             .Include(t => t.Usuario)
+            .Include(t => t.Novedades)
+                .ThenInclude(n => n.Usuario)
+            // Y quien la cerro, que no es la misma persona: entre reportar y
+            // resolver pasan dias. Sin este Include el nombre volveria vacio, y
+            // vacio es indistinguible de "todavia no se ha cerrado".
+            .Include(t => t.Novedades)
+                .ThenInclude(n => n.UsuarioCierre)
             .AsQueryable();
 
         if (sucursalOrigenId is int origen)
@@ -75,7 +91,72 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
             .Include(t => t.Usuario)
             .Include(t => t.Novedades)
                 .ThenInclude(n => n.Usuario)
+            .Include(t => t.Novedades)
+                .ThenInclude(n => n.UsuarioCierre)
             .FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+
+    public async Task<IReadOnlyList<Transferencia>> ObtenerParaReporteAsync(
+        DateTime? desde = null,
+        DateTime? hasta = null,
+        int? sucursalId = null,
+        CancellationToken cancellationToken = default)
+    {
+        // SIN TOPE DE FILAS, al contrario que el listado, y a proposito: un
+        // informe recortado a las cien mas recientes daria porcentajes de una
+        // muestra arbitraria y los presentaria como los del periodo. Lo que
+        // acota aqui es el periodo, que quien consulta elige.
+        var consulta = _db.Transferencias
+            .AsNoTracking()
+            .Include(t => t.SucursalOrigen)
+            .Include(t => t.SucursalDestino)
+            .Include(t => t.Novedades)
+            .AsQueryable();
+
+        if (desde is DateTime d)
+        {
+            consulta = consulta.Where(t => t.FechaSolicitud >= d);
+        }
+
+        if (hasta is DateTime h)
+        {
+            consulta = consulta.Where(t => t.FechaSolicitud <= h);
+        }
+
+        // Una sede entra al informe por sus dos lados: lo que despacha y lo que
+        // recibe. Filtrar solo por origen dejaria fuera la mitad de su
+        // actividad, y las rutas hacia ella no saldrian.
+        if (sucursalId is int s)
+        {
+            consulta = consulta.Where(
+                t => t.SucursalOrigenId == s || t.SucursalDestinoId == s);
+        }
+
+        return await consulta
+            .OrderBy(t => t.FechaSolicitud)
+            .ThenBy(t => t.Id)
+            .ToListAsync(cancellationToken);
+    }
+
+    public Task<NovedadTransferencia?> ObtenerNovedadParaOperarAsync(
+        int id,
+        CancellationToken cancellationToken = default) =>
+        // Con seguimiento: esta fila se cierra. No lleva FOR UPDATE porque el
+        // traslado si lo lleva -se bloquea en la misma transaccion- y es ese el
+        // que decide si se cierra o no.
+        _db.NovedadesTransferencia
+            .FirstOrDefaultAsync(n => n.Id == id, cancellationToken);
+
+    public Task<int> ContarNovedadesAbiertasAsync(
+        int transferenciaId,
+        int exceptoNovedadId,
+        CancellationToken cancellationToken = default) =>
+        _db.NovedadesTransferencia
+            .AsNoTracking()
+            .CountAsync(
+                n => n.TransferenciaId == transferenciaId
+                  && n.Id != exceptoNovedadId
+                  && n.Estado == EstadoNovedad.Abierta,
+                cancellationToken);
 
     public async Task<Transferencia?> ObtenerParaOperarAsync(
         int id,

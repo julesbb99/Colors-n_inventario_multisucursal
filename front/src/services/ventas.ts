@@ -74,9 +74,23 @@ export async function buscarClientePorDocumento(documento: string): Promise<Clie
 interface FiltrosVentas {
   sucursalId: number | null;
   clienteId?: number | null;
-  /** Fechas en ISO. El endpoint las recibe como `DateTime`. */
+  /**
+   * Fechas SIN HUSO, en `AAAA-MM-DDTHH:MM:SS`. El endpoint las recibe como
+   * `DateTime` y las compara contra `ventas.fecha`, que es hora local de la
+   * tienda. Mandarlas con `toISOString()` las convertiría a UTC y en Colombia
+   * (UTC-5) el día pedido empezaría a las 19:00 del día anterior.
+   *
+   * Los dos extremos son INCLUSIVOS: la API filtra con `>=` y `<=`.
+   */
   desde?: string | null;
   hasta?: string | null;
+  /**
+   * Tope de filas. La API lo acota entre 1 y 1000 y usa 100 si no va.
+   *
+   * Importa cuando se consulta un día concreto: ahí no se quiere «las 100 más
+   * recientes» sino el día completo, o el resumen de abajo mentiría.
+   */
+  limite?: number | null;
 }
 
 export async function obtenerVentas({
@@ -84,6 +98,7 @@ export async function obtenerVentas({
   clienteId = null,
   desde = null,
   hasta = null,
+  limite = null,
 }: FiltrosVentas): Promise<VentaDto[]> {
   const { data } = await axiosInstance.get<VentaDto[]>(RUTA, {
     params: {
@@ -91,6 +106,7 @@ export async function obtenerVentas({
       ...(clienteId === null ? {} : { clienteId }),
       ...(desde === null ? {} : { desde }),
       ...(hasta === null ? {} : { hasta }),
+      ...(limite === null ? {} : { limite }),
     },
   });
   return data;

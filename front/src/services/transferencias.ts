@@ -1,11 +1,14 @@
 import axiosInstance from '../interceptors/axiosInstance';
+import { paramsDeSede } from './comun';
 import type {
+  CerrarNovedadDto,
   CierreTransferenciaDto,
   CrearTransferenciaDto,
   DespacharTransferenciaDto,
   GuardarTransportadoraDto,
   RecibirTransferenciaDto,
   RegistrarNovedadDto,
+  ReporteCumplimientoDto,
   TransferenciaDto,
   TransportadoraDto,
 } from '../models/transferencias';
@@ -182,5 +185,53 @@ export async function cancelarTransferencia(id: number, peticion: CierreTransfer
  */
 export async function registrarNovedad(id: number, peticion: RegistrarNovedadDto) {
   const { data } = await axiosInstance.post(`${RUTA}/${id}/novedades`, peticion);
+  return data;
+}
+
+/**
+ * Cierra una novedad que quedó esperando desenlace: llegó lo que faltaba, la
+ * transportadora respondió, o se da por perdido.
+ *
+ * NO BORRA NADA. La novedad se conserva entera -tipo, cantidad, quién la
+ * reportó y cuándo- y se le añade el desenlace con su motivo. El motivo es
+ * obligatorio: sin él la API responde 400, porque sin él cerrar sería
+ * indistinguible de borrar.
+ *
+ * Si era la última pendiente, el traslado sale de «por recibir» y pasa a
+ * «Cerrada con faltante».
+ */
+export async function cerrarNovedad(
+  id: number,
+  novedadId: number,
+  peticion: CerrarNovedadDto,
+) {
+  const { data } = await axiosInstance.post(
+    `${RUTA}/${id}/novedades/${novedadId}/cierre`,
+    peticion,
+  );
+  return data;
+}
+
+/**
+ * Informe de cumplimiento logístico, por sucursal y por ruta.
+ *
+ * `desde` y `hasta` van en `AAAA-MM-DDTHH:MM:SS` SIN HUSO y filtran por fecha de
+ * solicitud. La API acota igualmente a la sede de quien pregunta.
+ */
+export async function obtenerReporteCumplimiento(
+  sucursalId: number | null,
+  desde?: string | null,
+  hasta?: string | null,
+): Promise<ReporteCumplimientoDto> {
+  const { data } = await axiosInstance.get<ReporteCumplimientoDto>(
+    `${RUTA}/reportes/cumplimiento`,
+    {
+      params: {
+        ...paramsDeSede(sucursalId),
+        ...(desde ? { desde } : {}),
+        ...(hasta ? { hasta } : {}),
+      },
+    },
+  );
   return data;
 }

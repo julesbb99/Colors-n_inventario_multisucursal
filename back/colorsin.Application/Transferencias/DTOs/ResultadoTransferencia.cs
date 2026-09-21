@@ -84,7 +84,38 @@ public enum ErrorTransferencia
     /// La cantidad recibida supera la despachada. Aceptarlo crearia stock de la
     /// nada, asi que se rechaza en vez de recortarse en silencio.
     /// </summary>
-    RecibidaExcedeDespachada
+    RecibidaExcedeDespachada,
+
+    /// <summary>
+    /// Se intenta despachar mas de lo que se pidio.
+    ///
+    /// El ajuste del origen existe para mandar MENOS. De mas seria stock que el
+    /// destino no pidio y que su bodega no espera.
+    /// </summary>
+    DespachadaExcedeSolicitada,
+
+    /// <summary>
+    /// Se intenta recibir antes de la fecha estimada de llegada.
+    ///
+    /// La recepcion no se habilita hasta ese dia: contar mercancia que segun la
+    /// guia todavia viaja solo puede salir de un conteo a ojo.
+    /// </summary>
+    RecepcionAnticipada,
+
+    /// <summary>La novedad no existe.</summary>
+    NovedadNoEncontrada,
+
+    /// <summary>La novedad ya estaba cerrada: no hay desenlace que registrar.</summary>
+    NovedadYaCerrada,
+
+    /// <summary>
+    /// Se intenta cerrar una novedad sin decir por que.
+    ///
+    /// El motivo es obligatorio a proposito: sin el, cerrar seria
+    /// indistinguible de borrar, y lo que se guarda es justamente para poder
+    /// revisarlo despues.
+    /// </summary>
+    MotivoCierreNoIndicado
 }
 
 /// <summary>Desenlace de una operacion sobre un traslado.</summary>
@@ -139,17 +170,45 @@ public sealed record ResultadoNovedad(
 
     /// <param name="cerroElTraslado">
     /// Si ademas paso el traslado a <c>Cerrada</c>, que ocurre cuando venia de
-    /// <c>RecibidaParcial</c>: dar cuenta del faltante es su ultimo paso.
+    /// <c>RecibidaParcial</c> y la novedad no dejo nada pendiente.
     ///
     /// El mensaje TIENE que decirlo. Antes decia siempre "no afecta el estado
     /// del traslado", y desde que la novedad lo cierra eso era falso justo en el
     /// caso mas frecuente.
     /// </param>
-    public static ResultadoNovedad Ok(int novedadId, TipoNovedad tipo, bool cerroElTraslado) =>
+    /// <param name="quedaAbierta">
+    /// Si la novedad espera desenlace -un reenvio o una reclamacion-. En ese
+    /// caso el traslado NO se cierra: sigue pendiente hasta que se resuelva.
+    /// </param>
+    public static ResultadoNovedad Ok(
+        int novedadId,
+        TipoNovedad tipo,
+        bool cerroElTraslado,
+        bool quedaAbierta = false) =>
+        new(true, ErrorTransferencia.Ninguno,
+            quedaAbierta
+                ? $"Novedad de tipo {tipo} registrada y PENDIENTE de desenlace. El traslado sigue " +
+                  "por recibir hasta que se cierre. No se movio saldo."
+                : cerroElTraslado
+                    ? $"Novedad de tipo {tipo} registrada. El traslado queda CERRADO: llego corto " +
+                      "y ya se dio cuenta del faltante. No se movio saldo."
+                    : $"Novedad de tipo {tipo} registrada. No afecta el saldo ni el estado del " +
+                      "traslado.",
+            novedadId);
+
+    /// <summary>Desenlace de cerrar una novedad que estaba pendiente.</summary>
+    /// <param name="novedadId">La novedad cerrada.</param>
+    /// <param name="cerroElTraslado">
+    /// Si con esta se acabaron las pendientes y el traslado paso a
+    /// <c>Cerrada</c>. Falso cuando todavia le quedan otras abiertas.
+    /// </param>
+    public static ResultadoNovedad Cerrada(int novedadId, bool cerroElTraslado) =>
         new(true, ErrorTransferencia.Ninguno,
             cerroElTraslado
-                ? $"Novedad de tipo {tipo} registrada. El traslado queda CERRADO: llego corto y " +
-                  "ya se dio cuenta del faltante. No se movio saldo."
-                : $"Novedad de tipo {tipo} registrada. No afecta el saldo ni el estado del traslado.",
+                ? "Novedad cerrada con su motivo. Era la ultima pendiente, asi que el traslado " +
+                  "queda CERRADO. No se borro nada: el reporte original sigue con su tipo, su " +
+                  "cantidad y quien lo firmo."
+                : "Novedad cerrada con su motivo. El traslado sigue pendiente porque le quedan " +
+                  "otras novedades abiertas.",
             novedadId);
 }

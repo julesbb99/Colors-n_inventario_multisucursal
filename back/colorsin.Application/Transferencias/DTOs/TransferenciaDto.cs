@@ -10,6 +10,17 @@ namespace Colorsin.Application.Transferencias.DTOs;
 /// Cuanto producto involucra, cuando aplica. Es informativa: registrar una
 /// novedad NO mueve stock. Lo que cambia el saldo es la cantidad recibida.
 /// </param>
+/// <param name="Tratamiento">
+/// 'Ninguno', 'Reenvio', 'Reclamacion' o 'Asumido'. Los dos del medio dejan el
+/// traslado pendiente; los otros dos no.
+/// </param>
+/// <param name="Estado">'Abierta' o 'Cerrada'.</param>
+/// <param name="MotivoCierre">El porque del cierre. Nulo mientras sigue abierta.</param>
+/// <param name="FechaCierre">Cuando se cerro.</param>
+/// <param name="UsuarioCierreNombre">
+/// Quien la cerro. Distinto de quien la reporto: entre las dos cosas suelen
+/// pasar dias, y a veces no es la misma persona ni la misma sede.
+/// </param>
 /// <param name="Observaciones">Descripcion libre del hallazgo.</param>
 /// <param name="Fecha">Momento del reporte.</param>
 public sealed record NovedadTransferenciaDto(
@@ -19,6 +30,11 @@ public sealed record NovedadTransferenciaDto(
     string UsuarioNombre,
     string? Tipo,
     decimal? CantidadAfectada,
+    string Tratamiento,
+    string Estado,
+    string? MotivoCierre,
+    DateTime? FechaCierre,
+    string? UsuarioCierreNombre,
     string? Observaciones,
     DateTime? Fecha);
 
@@ -39,16 +55,33 @@ public sealed record NovedadTransferenciaDto(
 /// <param name="TransportadoraNombre">Razon social de la transportadora.</param>
 /// <param name="Guia">Numero de guia. Nulo hasta el despacho.</param>
 /// <param name="CantidadSolicitada">Lo pedido, en <paramref name="UnidadId"/>.</param>
+/// <param name="CantidadDespachada">
+/// Lo que de verdad salio del origen. Nulo hasta el despacho. Menor que lo
+/// solicitado significa que el origen no tenia todo; esa diferencia NO es una
+/// perdida, sigue en su estante.
+/// </param>
 /// <param name="CantidadRecibida">
 /// Lo que llego, en la misma unidad. Nulo hasta que la sede destino confirma.
-/// Menor que lo solicitado significa que algo se perdio en transito.
+/// Menor que lo DESPACHADO significa que algo se perdio en transito.
 /// </param>
 /// <param name="UnidadId">Unidad del traslado, que puede no ser la unidad base del producto.</param>
 /// <param name="UnidadSimbolo">Abreviatura de esa unidad.</param>
 /// <param name="Estado">'Solicitada', 'EnTransito', 'Completada', 'RecibidaParcial', 'Rechazada' o 'Cancelada'.</param>
 /// <param name="Urgencia">'Baja', 'Media' o 'Alta'.</param>
 /// <param name="FechaSolicitud">Cuando se pidio.</param>
+/// <param name="FechaDespacho">Cuando salio del origen. Nula mientras esta 'Solicitada'.</param>
 /// <param name="FechaEstimadaLlegada">Cuando se espera que llegue. Se fija al despachar.</param>
+/// <param name="FechaRecepcion">
+/// Cuando la conto el destino. Contra la estimada dice si llego tarde; menos la
+/// de despacho, el transito real.
+/// </param>
+/// <param name="NovedadesAbiertas">
+/// Cuantas novedades siguen esperando desenlace.
+///
+/// VIAJA EN EL LISTADO aunque <paramref name="Novedades"/> venga vacia: la
+/// pantalla necesita saber si el traslado tiene algo pendiente sin cargar el
+/// detalle de las cien filas.
+/// </param>
 /// <param name="Movimientos">
 /// Lo que el traslado movio en el stock, lote por lote. Viene vacia en los
 /// listados, que no cargan el libro mayor de cada fila.
@@ -68,12 +101,16 @@ public sealed record TransferenciaDto(
     string? TransportadoraNombre,
     string? Guia,
     decimal? CantidadSolicitada,
+    decimal? CantidadDespachada,
     decimal? CantidadRecibida,
     int UnidadId,
     string UnidadSimbolo,
     string? Estado,
     string? Urgencia,
     DateTime? FechaSolicitud,
+    DateTime? FechaDespacho,
     DateTime? FechaEstimadaLlegada,
+    DateTime? FechaRecepcion,
+    int NovedadesAbiertas,
     IReadOnlyList<DetalleTransferenciaDto> Movimientos,
     IReadOnlyList<NovedadTransferenciaDto> Novedades);

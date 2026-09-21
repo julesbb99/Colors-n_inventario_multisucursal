@@ -19,10 +19,22 @@ namespace Colorsin.Application.Transferencias.DTOs;
 /// reclama si la carga llega mal o no llega.
 /// </param>
 /// <param name="FechaEstimadaLlegada">Cuando se espera que llegue. Opcional.</param>
+/// <param name="CantidadDespachada">
+/// Lo que DE VERDAD se manda, cuando no es todo lo pedido.
+///
+/// EXISTE PORQUE EL ORIGEN NO SIEMPRE TIENE TODO. Piden 5, hay 3. Hasta que
+/// esto existio solo cabian dos salidas -despachar 5 que no hay, o rechazar un
+/// traslado que si se podia atender a medias- y las dos eran peores que mandar
+/// los 3 y decirlo.
+///
+/// Nula despacha lo solicitado, que es el caso normal. No puede ser mayor que
+/// lo solicitado: el ajuste solo va hacia abajo.
+/// </param>
 /// <param name="Observaciones">Nota que se copia a cada movimiento generado.</param>
 public sealed record DespacharTransferenciaDto(
     int TransferenciaId,
     int TransportadoraId,
     string Guia,
     DateTime? FechaEstimadaLlegada = null,
+    decimal? CantidadDespachada = null,
     string? Observaciones = null);

@@ -404,6 +404,17 @@ public sealed class TransferenciasService : ITransferenciasService
                 "carga llega mal o no llega.");
         }
 
+        // Cero o negativo no es "ajustar lo que puedo dar": es no despachar. Y
+        // para eso esta el rechazo, que ademas deja dicho por que.
+        if (peticion.CantidadDespachada is <= 0m)
+        {
+            return ResultadoTransferencia.Fallo(
+                ErrorTransferencia.CantidadInvalida,
+                $"La cantidad a despachar debe ser mayor que cero; llego " +
+                $"{Num(peticion.CantidadDespachada!.Value)}. Si no se puede mandar nada, " +
+                "rechaza el traslado en vez de despachar cero.");
+        }
+
         // Se trae la fila entera en vez de preguntar solo si existe: hay que
         // mirar tambien que no este retirada, y el mensaje necesita su nombre.
         var transportadora = await _transportadoras.ObtenerPorIdAsync(
@@ -492,13 +503,35 @@ public sealed class TransferenciasService : ITransferenciasService
                 $"No existe el producto {transferencia.ProductoId}.");
         }
 
-        var cantidad = transferencia.CantidadSolicitada ?? 0m;
-        if (cantidad <= 0m)
+        var solicitada = transferencia.CantidadSolicitada ?? 0m;
+        if (solicitada <= 0m)
         {
             return ResultadoTransferencia.Fallo(
                 ErrorTransferencia.CantidadInvalida,
                 $"El traslado {transferencia.Id} no tiene cantidad que despachar.");
         }
+
+        // EL ORIGEN AJUSTA LO QUE PUEDE MANDAR. Sin cantidad se manda lo
+        // pedido, que es el caso normal; con una menor, se manda esa y el
+        // traslado queda diciendo las dos cifras.
+        //
+        // SOLO HACIA ABAJO. Mandar de mas seria stock que el destino no pidio
+        // y cuya entrada su bodega no espera; ademas lo impide el CHECK
+        // `chk_transf_despachada`, asi que aqui se rechaza con motivo en vez de
+        // dejar que salte la base con un error sin explicacion.
+        var cantidad = peticion.CantidadDespachada ?? solicitada;
+
+        if (cantidad > solicitada)
+        {
+            return ResultadoTransferencia.Fallo(
+                ErrorTransferencia.DespachadaExcedeSolicitada,
+                $"Se intentan despachar {Num(cantidad)} y el traslado pidio {Num(solicitada)}. " +
+                "El ajuste del origen sirve para mandar MENOS de lo pedido, no mas: la sede " +
+                "destino no espera ese excedente. Si de verdad hace falta mas, que lo pidan en " +
+                "otro traslado.");
+        }
+
+        var ajustado = cantidad < solicitada;
 
         var conversion = await ConvertirAsync(
             cantidad, transferencia.UnidadId, producto, cancellationToken);
@@ -527,8 +560,9 @@ public sealed class TransferenciasService : ITransferenciasService
             return ResultadoTransferencia.Fallo(
                 ErrorTransferencia.StockInsuficiente,
                 $"Stock insuficiente de '{producto.Nombre}' en la sede " +
-                $"{transferencia.SucursalOrigenId}: hay {Num(saldoOrigen.CantidadBase)} y el " +
-                $"traslado pide {Num(cantidadBase)}.");
+                $"{transferencia.SucursalOrigenId}: hay {Num(saldoOrigen.CantidadBase)} y se " +
+                $"intentan despachar {Num(cantidadBase)}. " +
+                "Se puede despachar menos de lo pedido indicando la cantidad que si hay.");
         }
 
         // --- Aplicar. Desde aqui ya no hay rechazos ------------------------------
@@ -567,7 +601,12 @@ public sealed class TransferenciasService : ITransferenciasService
 
         transferencia.TransportadoraId = peticion.TransportadoraId;
         transferencia.Guia = peticion.Guia.Trim();
+        transferencia.CantidadDespachada = cantidad;
         transferencia.FechaEstimadaLlegada = peticion.FechaEstimadaLlegada;
+        // Se guarda aqui y no se deduce del movimiento: el informe de
+        // cumplimiento la necesita en cada fila, y cruzar el libro mayor para
+        // obtenerla convertiria el informe en una consulta por traslado.
+        transferencia.FechaDespacho = DateTime.Now;
         transferencia.Estado = EstadoTransferencia.EnTransito;
 
         await _transferencias.GuardarCambiosAsync(cancellationToken);
@@ -576,6 +615,8 @@ public sealed class TransferenciasService : ITransferenciasService
             Modulo, "DespacharTransferencia", usuarioId,
             $"transferencia={transferencia.Id} | estado=Solicitada->EnTransito | " +
             $"origen={transferencia.SucursalOrigenId} | producto={transferencia.ProductoId} | " +
+            $"solicitada={Num(solicitada)} despachada={Num(cantidad)}" +
+            (ajustado ? $" AJUSTADA(-{Num(solicitada - cantidad)})" : string.Empty) + " | " +
             $"cantidadBase=-{Num(cantidadBase)} | saldo={Num(saldoResultante)} | " +
             $"transportadora={peticion.TransportadoraId} | guia={transferencia.Guia}" +
             DetalleLotes(movimientos),
@@ -583,9 +624,18 @@ public sealed class TransferenciasService : ITransferenciasService
 
         await _transferencias.GuardarCambiosAsync(cancellationToken);
 
+        // El mensaje dice el ajuste cuando lo hay, y dice lo que NO significa:
+        // la diferencia no se perdio, se quedo en el estante del origen. Quien
+        // lo lea tiene que saber que ese traslado ya no va a traer los 5.
+        var mensaje = ajustado
+            ? $"Traslado {transferencia.Id} despachado con guia {transferencia.Guia}, ajustado a " +
+              $"{Num(cantidad)} de los {Num(solicitada)} pedidos. Los {Num(solicitada - cantidad)} " +
+              "restantes NO se perdieron: no salieron, siguen en el origen. Si el destino los " +
+              "necesita, hay que pedirlos en otro traslado."
+            : $"Traslado {transferencia.Id} despachado con guia {transferencia.Guia}.";
+
         return ResultadoTransferencia.Ok(
-            transferencia.Id, EstadoTransferencia.EnTransito,
-            $"Traslado {transferencia.Id} despachado con guia {transferencia.Guia}.",
+            transferencia.Id, EstadoTransferencia.EnTransito, mensaje,
             cantidadBase, saldoResultante,
             movimientos.Select(m => m.ToDetalleDto()).ToList());
     }
@@ -644,6 +694,25 @@ public sealed class TransferenciasService : ITransferenciasService
                 "recibir uno EnTransito.");
         }
 
+        // NO SE RECIBE ANTES DE LA FECHA ESTIMADA DE LLEGADA.
+        //
+        // Se compara por DIA, no por instante: la fecha estimada se guarda a
+        // medianoche, asi que comparar instantes haria que el dia de la llegada
+        // no se pudiera recibir hasta las 00:00 del siguiente.
+        //
+        // Vale para todos los roles, incluido el Administrador General: quien
+        // cuenta la mercancia es quien la tiene delante, y el rango no adelanta
+        // el camion.
+        if (transferencia.FechaEstimadaLlegada is DateTime estimada
+            && DateTime.Now.Date < estimada.Date)
+        {
+            return ResultadoTransferencia.Fallo(
+                ErrorTransferencia.RecepcionAnticipada,
+                $"El traslado {transferencia.Id} no llega hasta el {estimada:yyyy-MM-dd} y hoy es " +
+                $"{DateTime.Now:yyyy-MM-dd}. La recepcion se habilita ese dia: contar mercancia " +
+                "que segun la guia todavia viaja solo puede salir de un conteo a ojo.");
+        }
+
         var producto = await _productos.ObtenerPorIdAsync(transferencia.ProductoId, cancellationToken);
         if (producto is null)
         {
@@ -667,16 +736,27 @@ public sealed class TransferenciasService : ITransferenciasService
                 "registrados; no hay nada que recibir.");
         }
 
+        // SE COMPARA CONTRA LO DESPACHADO, NO CONTRA LO SOLICITADO, y este es el
+        // punto donde mas se notaria la diferencia: si pidieron 5, el origen
+        // solo tenia 3 y llegaron los 3, el traslado llego COMPLETO. Medirlo
+        // contra los 5 lo marcaria como perdida en transito de dos unidades que
+        // nunca subieron al camion, y ademas le cargaria esa merma a la
+        // transportadora.
+        //
+        // El `?? CantidadSolicitada` cubre los traslados despachados antes de
+        // que existiera la columna, que salieron por lo pedido.
         var solicitada = transferencia.CantidadSolicitada ?? 0m;
-        var recibida = peticion.CantidadRecibida ?? solicitada;
+        var despachada = transferencia.CantidadDespachada ?? solicitada;
+        var recibida = peticion.CantidadRecibida ?? despachada;
 
-        if (recibida > solicitada)
+        if (recibida > despachada)
         {
             return ResultadoTransferencia.Fallo(
                 ErrorTransferencia.RecibidaExcedeDespachada,
-                $"El traslado despacho {Num(solicitada)} y se intentan recibir " +
-                $"{Num(recibida)}. Recibir de mas crearia stock de la nada; si llego " +
-                "producto extra, registra una novedad de tipo Sobrante.");
+                $"El traslado despacho {Num(despachada)}" +
+                (despachada < solicitada ? $" (de {Num(solicitada)} pedidos)" : string.Empty) +
+                $" y se intentan recibir {Num(recibida)}. Recibir de mas crearia stock de la " +
+                "nada; si llego producto extra, registra una novedad de tipo Sobrante.");
         }
 
         // Se convierte lo RECIBIDO, no lo despachado: en una recepcion parcial
@@ -742,28 +822,36 @@ public sealed class TransferenciasService : ITransferenciasService
             transferencia.SucursalDestinoId, transferencia.ProductoId,
             recibidaBase, cancellationToken);
 
-        // Completada solo si llego todo. Si falta, RecibidaParcial: la
-        // diferencia salio del origen y nunca entro al destino, asi que es una
-        // baja neta de la red y el libro mayor la refleja tal cual.
-        var completa = recibida >= solicitada;
+        // Completada solo si llego todo LO DESPACHADO. Si falta, RecibidaParcial:
+        // esa diferencia salio del origen y nunca entro al destino, asi que es
+        // una baja neta de la red y el libro mayor la refleja tal cual.
+        var completa = recibida >= despachada;
         var estadoNuevo = completa
             ? EstadoTransferencia.Completada
             : EstadoTransferencia.RecibidaParcial;
 
         transferencia.CantidadRecibida = recibida;
+        transferencia.FechaRecepcion = DateTime.Now;
         transferencia.Estado = estadoNuevo;
 
         await _transferencias.GuardarCambiosAsync(cancellationToken);
 
-        var faltante = solicitada - recibida;
+        // Perdido en el camino. NO es solicitada - recibida: eso mezclaria lo
+        // que el origen no mando con lo que se extravio, y son cosas distintas
+        // con responsables distintos.
+        var faltante = despachada - recibida;
+        var noDespachado = solicitada - despachada;
+        var tarde = transferencia.FechaEstimadaLlegada is DateTime fe
+                    && DateTime.Now.Date > fe.Date;
 
         await _auditoria.RegistrarEventoAsync(
             Modulo, "RecibirTransferencia", usuarioId,
             $"transferencia={transferencia.Id} | estado=EnTransito->{estadoNuevo} | " +
             $"destino={transferencia.SucursalDestinoId} | producto={transferencia.ProductoId} | " +
-            $"solicitada={Num(solicitada)} recibida={Num(recibida)} " +
-            $"faltante={Num(faltante)} | cantidadBase=+{Num(recibidaBase)} | " +
-            $"saldo={Num(saldoResultante)}" +
+            $"solicitada={Num(solicitada)} despachada={Num(despachada)} " +
+            $"recibida={Num(recibida)} | faltanteEnTransito={Num(faltante)} " +
+            $"noDespachado={Num(noDespachado)} | plazo={(tarde ? "TARDE" : "a tiempo")} | " +
+            $"cantidadBase=+{Num(recibidaBase)} | saldo={Num(saldoResultante)}" +
             DetalleLotes(movimientos),
             cancellationToken);
 
@@ -771,10 +859,16 @@ public sealed class TransferenciasService : ITransferenciasService
 
         var mensaje = completa
             ? $"Traslado {transferencia.Id} recibido completo en la sede " +
-              $"{transferencia.SucursalDestinoId}."
-            : $"Traslado {transferencia.Id} recibido parcial: llegaron {Num(recibida)} de " +
-              $"{Num(solicitada)}. Faltan {Num(faltante)}, que se dan por perdidos en " +
-              "transito; conviene registrar una novedad de tipo Faltante.";
+              $"{transferencia.SucursalDestinoId}: llego todo lo que se despacho " +
+              $"({Num(despachada)})." +
+              (noDespachado > 0m
+                  ? $" El origen habia ajustado el envio: de los {Num(solicitada)} pedidos no " +
+                    $"salieron {Num(noDespachado)}, que siguen en su bodega."
+                  : string.Empty)
+            : $"Traslado {transferencia.Id} recibido parcial: llegaron {Num(recibida)} de los " +
+              $"{Num(despachada)} despachados. Faltan {Num(faltante)}, perdidos en transito. " +
+              "Hay que registrar la novedad y decir que se hace con ellos: reenvio, " +
+              "reclamacion a la transportadora, o darlos por perdidos.";
 
         return ResultadoTransferencia.Ok(
             transferencia.Id, estadoNuevo, mensaje,
@@ -897,35 +991,50 @@ public sealed class TransferenciasService : ITransferenciasService
                     $"No existe el traslado {peticion.TransferenciaId}.");
             }
 
-            // NO se valida el estado a proposito: los danos se descubren al
-            // abrir las cajas, que suele ser despues de cerrar el traslado.
-            // Una novedad documenta, no mueve stock ni cambia el estado, asi
-            // que registrarla tarde no rompe nada.
+            // EL TRATAMIENTO DECIDE SI LA NOVEDAD NACE ABIERTA.
+            //
+            // Reenvio y Reclamacion dejan trabajo por delante: alguien tiene que
+            // volver a mandar la mercancia, o pelear el cobro con la
+            // transportadora. Mientras eso no se resuelva la novedad sigue
+            // abierta y el traslado NO puede cerrarse.
+            //
+            // Ninguno y Asumido no esperan nada: el apunte esta completo en el
+            // momento en que se escribe.
+            var quedaAbierta =
+                peticion.Tratamiento is TratamientoNovedad.Reenvio
+                                     or TratamientoNovedad.Reclamacion;
+
+            // NO se valida el estado del traslado a proposito: los danos se
+            // descubren al abrir las cajas, que suele ser despues de cerrarlo.
             var novedad = new NovedadTransferencia
             {
                 TransferenciaId = peticion.TransferenciaId,
                 UsuarioId = usuarioId,
                 Tipo = peticion.Tipo,
                 CantidadAfectada = peticion.CantidadAfectada,
+                Tratamiento = peticion.Tratamiento,
+                Estado = quedaAbierta ? EstadoNovedad.Abierta : EstadoNovedad.Cerrada,
                 Observaciones = peticion.Observaciones
                 // Fecha la pone la base con CURRENT_TIMESTAMP.
             };
             _transferencias.AgregarNovedad(novedad);
 
-            // LA NOVEDAD CIERRA EL TRASLADO QUE LLEGO CORTO, y solo ese.
+            // LA NOVEDAD CIERRA EL TRASLADO QUE LLEGO CORTO, pero solo si no
+            // deja nada pendiente.
             //
-            // Dar cuenta del faltante es el ultimo paso real: a partir de ahi no
-            // queda nada que hacer con el traslado. Sin este cambio se quedaba en
-            // 'RecibidaParcial' para siempre y seguia contando como trabajo en
-            // curso, llenando la lista de pendientes de traslados terminados.
+            // Antes lo cerraba siempre, y eso daba por terminado lo que seguia
+            // en curso: un faltante que el origen va a reenviar no esta
+            // resuelto, esta esperando. Ahora el traslado se queda en
+            // 'RecibidaParcial' -o sea, por recibir- hasta que esa novedad se
+            // cierre con su motivo.
             //
             // SOLO DESDE RecibidaParcial. Una novedad sobre uno EnTransito es un
             // retraso o un aviso, y ese traslado sigue viajando: cerrarlo ahi
             // daria por terminada mercancia que aun no ha llegado. Y sobre uno ya
-            // cerrado -los danos se descubren al abrir las cajas, a veces dias
-            // despues- no hay nada que cambiar.
+            // cerrado no hay nada que cambiar.
             var estadoAnterior = transferencia.Estado;
-            var cierra = estadoAnterior == EstadoTransferencia.RecibidaParcial;
+            var cierra = !quedaAbierta
+                      && estadoAnterior == EstadoTransferencia.RecibidaParcial;
 
             if (cierra)
             {
@@ -937,7 +1046,8 @@ public sealed class TransferenciasService : ITransferenciasService
             await _auditoria.RegistrarEventoAsync(
                 Modulo, "RegistrarNovedadTransferencia", usuarioId,
                 $"novedad={novedad.Id} | transferencia={peticion.TransferenciaId} | " +
-                $"tipo={peticion.Tipo} | " +
+                $"tipo={peticion.Tipo} | tratamiento={peticion.Tratamiento} | " +
+                $"novedad={(quedaAbierta ? "ABIERTA (pendiente de desenlace)" : "cerrada al nacer")} | " +
                 $"cantidadAfectada={(peticion.CantidadAfectada is null ? "(sin indicar)" : Num(peticion.CantidadAfectada.Value))} | " +
                 $"estadoTraslado={(cierra ? $"{estadoAnterior}->Cerrada" : $"{estadoAnterior} (sin cambios)")} | " +
                 $"obs={peticion.Observaciones ?? "(sin observaciones)"}",
@@ -945,9 +1055,273 @@ public sealed class TransferenciasService : ITransferenciasService
 
             await _transferencias.GuardarCambiosAsync(ct);
 
-            return ResultadoNovedad.Ok(novedad.Id, peticion.Tipo, cierra);
+            return ResultadoNovedad.Ok(novedad.Id, peticion.Tipo, cierra, quedaAbierta);
         }, cancellationToken);
     }
+
+    public async Task<ResultadoNovedad> CerrarNovedadAsync(
+        int novedadId,
+        string? motivo,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        if (usuarioId <= 0)
+        {
+            return ResultadoNovedad.Fallo(
+                ErrorTransferencia.UsuarioNoIndicado,
+                $"Hay que indicar el usuario que cierra; llego {usuarioId}.");
+        }
+
+        // EL MOTIVO ES OBLIGATORIO, y no por formalismo. Sin el, cerrar una
+        // novedad seria indistinguible de borrarla: dentro de seis meses nadie
+        // sabria si aquel faltante aparecio, si lo pago la transportadora o si
+        // se dio por perdido. Esa frase ES el valor de guardar la novedad.
+        if (string.IsNullOrWhiteSpace(motivo))
+        {
+            return ResultadoNovedad.Fallo(
+                ErrorTransferencia.MotivoCierreNoIndicado,
+                "Hay que decir POR QUE se cierra la novedad: si llego lo que faltaba, si lo " +
+                "respondio la transportadora o si se da por perdido. Es lo unico que queda para " +
+                "revisarlo despues.");
+        }
+
+        return await _transferencias.EjecutarEnTransaccionAsync(async ct =>
+        {
+            var novedad = await _transferencias.ObtenerNovedadParaOperarAsync(novedadId, ct);
+
+            if (novedad is null)
+            {
+                return ResultadoNovedad.Fallo(
+                    ErrorTransferencia.NovedadNoEncontrada,
+                    $"No existe la novedad {novedadId}.");
+            }
+
+            if (novedad.Estado == EstadoNovedad.Cerrada)
+            {
+                return ResultadoNovedad.Fallo(
+                    ErrorTransferencia.NovedadYaCerrada,
+                    $"La novedad {novedadId} ya estaba cerrada" +
+                    (novedad.FechaCierre is DateTime f ? $" el {f:yyyy-MM-dd}" : string.Empty) +
+                    ". No hay desenlace que registrar.");
+            }
+
+            // Se bloquea el traslado ANTES de tocar nada: el cierre puede
+            // cambiarle el estado, y dos cierres simultaneos de dos novedades
+            // del mismo traslado no pueden ver los dos "me queda una abierta".
+            var transferencia = await _transferencias.ObtenerParaOperarAsync(
+                novedad.TransferenciaId, ct);
+
+            if (transferencia is null)
+            {
+                return ResultadoNovedad.Fallo(
+                    ErrorTransferencia.TransferenciaNoEncontrada,
+                    $"No existe el traslado {novedad.TransferenciaId} de la novedad {novedadId}.");
+            }
+
+            var tratamiento = novedad.Tratamiento;
+
+            novedad.Estado = EstadoNovedad.Cerrada;
+            novedad.MotivoCierre = motivo.Trim();
+            novedad.FechaCierre = DateTime.Now;
+            novedad.UsuarioCierreId = usuarioId;
+
+            // El traslado cierra cuando se le acaban las pendientes, no con la
+            // primera que se resuelva: uno que llego corto Y con una lata rota
+            // tiene dos desenlaces que esperar.
+            var otrasAbiertas = await _transferencias.ContarNovedadesAbiertasAsync(
+                novedad.TransferenciaId, novedadId, ct);
+
+            var estadoAnterior = transferencia.Estado;
+            var cierraTraslado = otrasAbiertas == 0
+                              && estadoAnterior == EstadoTransferencia.RecibidaParcial;
+
+            if (cierraTraslado)
+            {
+                transferencia.Estado = EstadoTransferencia.Cerrada;
+            }
+
+            await _transferencias.GuardarCambiosAsync(ct);
+
+            await _auditoria.RegistrarEventoAsync(
+                Modulo, "CerrarNovedadTransferencia", usuarioId,
+                $"novedad={novedadId} | transferencia={novedad.TransferenciaId} | " +
+                $"tipo={novedad.Tipo} | tratamiento={tratamiento} | estadoNovedad=Abierta->Cerrada | " +
+                $"otrasAbiertas={otrasAbiertas} | " +
+                $"estadoTraslado={(cierraTraslado ? $"{estadoAnterior}->Cerrada" : $"{estadoAnterior} (sin cambios)")} | " +
+                $"motivo={motivo.Trim()}",
+                ct);
+
+            await _transferencias.GuardarCambiosAsync(ct);
+
+            return ResultadoNovedad.Cerrada(novedadId, cierraTraslado);
+        }, cancellationToken);
+    }
+
+    // =========================================================================
+    // INFORME DE CUMPLIMIENTO LOGISTICO
+    // =========================================================================
+
+    public async Task<ReporteCumplimientoDto> ObtenerReporteCumplimientoAsync(
+        DateTime? desde = null,
+        DateTime? hasta = null,
+        int? sucursalId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var traslados = await _transferencias.ObtenerParaReporteAsync(
+            desde, hasta, sucursalId, cancellationToken);
+
+        // POR SEDE SE AGRUPA POR EL ORIGEN, no por el destino.
+        //
+        // El origen es quien responde: decide si atiende la peticion, decide
+        // cuanto manda y elige la transportadora. El destino solo cuenta lo que
+        // le llega. Agrupar por destino calificaria a una sede por el trabajo
+        // de otra, que es exactamente lo que un informe de cumplimiento no debe
+        // hacer.
+        var porSucursal = traslados
+            .GroupBy(t => (t.SucursalOrigenId, Nombre: t.SucursalOrigen?.Nombre ?? string.Empty))
+            .Select(g => Resumir(
+                $"sede-{g.Key.SucursalOrigenId}",
+                g.Key.Nombre,
+                g.Key.SucursalOrigenId,
+                null,
+                g))
+            .OrderByDescending(g => g.Solicitados)
+            .ThenBy(g => g.Etiqueta, StringComparer.CurrentCulture)
+            .ToList();
+
+        var porRuta = traslados
+            .GroupBy(t => (
+                t.SucursalOrigenId,
+                t.SucursalDestinoId,
+                Origen: t.SucursalOrigen?.Nombre ?? string.Empty,
+                Destino: t.SucursalDestino?.Nombre ?? string.Empty))
+            .Select(g => Resumir(
+                $"ruta-{g.Key.SucursalOrigenId}-{g.Key.SucursalDestinoId}",
+                // La flecha, y no un guion: la ruta tiene sentido y hay que
+                // poder leer de un vistazo cual sede manda y cual recibe.
+                $"{g.Key.Origen} → {g.Key.Destino}",
+                g.Key.SucursalOrigenId,
+                g.Key.SucursalDestinoId,
+                g))
+            .OrderByDescending(g => g.Solicitados)
+            .ThenBy(g => g.Etiqueta, StringComparer.CurrentCulture)
+            .ToList();
+
+        return new ReporteCumplimientoDto(
+            desde,
+            hasta,
+            Resumir("total", "Toda la red", null, null, traslados),
+            porSucursal,
+            porRuta);
+    }
+
+    /// <summary>
+    /// Cuenta un grupo de traslados.
+    ///
+    /// TODO SON CONTEOS Y NINGUNO ES UN VOLUMEN. Cada traslado lleva su producto
+    /// en su unidad -litros, galones, canecas- asi que sumar cantidades entre
+    /// traslados distintos daria una cifra con unidades mezcladas. Lo comparable
+    /// es cuantos llegaron completos y cuantos a tiempo.
+    /// </summary>
+    private static CumplimientoGrupoDto Resumir(
+        string clave,
+        string etiqueta,
+        int? origenId,
+        int? destinoId,
+        IEnumerable<Transferencia> grupo)
+    {
+        var lista = grupo as IList<Transferencia> ?? grupo.ToList();
+
+        var solicitados = lista.Count;
+        var rechazados = lista.Count(t => t.Estado == EstadoTransferencia.Rechazada);
+        var cancelados = lista.Count(t => t.Estado == EstadoTransferencia.Cancelada);
+
+        // Despachado = salio del origen. Se mira la FECHA y no el estado porque
+        // el estado sigue avanzando -EnTransito, Completada, Cerrada- y todos
+        // esos ya salieron.
+        var despachados = lista.Count(t => t.FechaDespacho is not null);
+
+        var recibidosLista = lista.Where(t => t.FechaRecepcion is not null).ToList();
+        var recibidos = recibidosLista.Count;
+
+        // Completo = llego todo LO QUE SE DESPACHO. Lo que el origen no mando
+        // no es culpa del transporte, y se cuenta aparte en AjustadosEnOrigen.
+        var completos = recibidosLista.Count(t =>
+            (t.CantidadRecibida ?? 0m) >= (t.CantidadDespachada ?? t.CantidadSolicitada ?? 0m));
+
+        // A tiempo se compara por DIA: la fecha estimada se guarda a medianoche
+        // y la recepcion con su hora, asi que comparar instantes marcaria como
+        // tarde todo lo que llega el mismo dia despues de las 00:00.
+        //
+        // Sin fecha estimada NO se cuenta ni a tiempo ni tarde: son los
+        // traslados anteriores a que fuera obligatoria, y meterlos en cualquiera
+        // de los dos lados falsearia el porcentaje.
+        var conPlazo = recibidosLista.Where(t => t.FechaEstimadaLlegada is not null).ToList();
+        var aTiempo = conPlazo.Count(t =>
+            t.FechaRecepcion!.Value.Date <= t.FechaEstimadaLlegada!.Value.Date);
+        var tarde = conPlazo.Count - aTiempo;
+
+        var ajustados = lista.Count(t =>
+            t.CantidadDespachada is decimal d
+            && t.CantidadSolicitada is decimal s
+            && d < s);
+
+        var enCurso = lista.Count(t =>
+            t.Estado is EstadoTransferencia.Solicitada
+                     or EstadoTransferencia.EnTransito
+                     or EstadoTransferencia.RecibidaParcial);
+
+        var conNovedad = lista.Count(t => t.Novedades.Count > 0);
+        var novedadesAbiertas = lista.Sum(t =>
+            t.Novedades.Count(n => n.Estado == EstadoNovedad.Abierta));
+
+        var transitos = recibidosLista
+            .Where(t => t.FechaDespacho is not null)
+            .Select(t => (decimal)(t.FechaRecepcion!.Value - t.FechaDespacho!.Value).TotalDays)
+            .ToList();
+
+        // La base de la atencion excluye los cancelados: los retiro quien los
+        // pidio, asi que contarlos como peticiones no atendidas le bajaria la
+        // nota a una bodega por algo que no decidio.
+        var atendibles = solicitados - cancelados;
+
+        return new CumplimientoGrupoDto(
+            clave,
+            etiqueta,
+            origenId,
+            destinoId,
+            solicitados,
+            despachados,
+            rechazados,
+            cancelados,
+            enCurso,
+            recibidos,
+            completos,
+            recibidos - completos,
+            aTiempo,
+            tarde,
+            ajustados,
+            conNovedad,
+            novedadesAbiertas,
+            transitos.Count == 0
+                ? null
+                : Math.Round(transitos.Sum() / transitos.Count, 1, MidpointRounding.AwayFromZero),
+            Porcentaje(despachados, atendibles),
+            Porcentaje(completos, recibidos),
+            Porcentaje(aTiempo, conPlazo.Count));
+    }
+
+    /// <summary>
+    /// Un porcentaje con un decimal, o <c>null</c> cuando no hay base.
+    ///
+    /// Nulo y no cero: "ningun traslado todavia" y "ninguno cumplio" son cosas
+    /// distintas, y pintar un 0 % en una sede que aun no ha despachado nada la
+    /// acusaria de algo que no hizo.
+    /// </summary>
+    private static decimal? Porcentaje(int parte, int total) =>
+        total <= 0
+            ? null
+            : Math.Round(parte * 100m / total, 1, MidpointRounding.AwayFromZero);
 
     // =========================================================================
     // AUXILIARES DE STOCK

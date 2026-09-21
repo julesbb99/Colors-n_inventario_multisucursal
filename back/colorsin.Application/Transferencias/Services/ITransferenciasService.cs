@@ -142,11 +142,17 @@ public interface ITransferenciasService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Deja constancia de un hallazgo sobre un traslado. No mueve stock ni
-    /// cambia el estado: se puede registrar en cualquier momento, incluso
-    /// despues de cerrado.
+    /// Deja constancia de un hallazgo sobre un traslado. NO MUEVE STOCK: se
+    /// puede registrar en cualquier momento, incluso despues de cerrado.
+    ///
+    /// SI PUEDE CAMBIAR EL ESTADO del traslado, segun el tratamiento:
+    ///
+    ///   Reenvio / Reclamacion  la novedad queda ABIERTA y el traslado sigue
+    ///                          pendiente: hay algo que esperar.
+    ///   Ninguno / Asumido      la novedad nace cerrada, y un traslado en
+    ///                          'RecibidaParcial' pasa a 'Cerrada'.
     /// </summary>
-    /// <param name="peticion">Traslado, tipo de novedad y descripcion.</param>
+    /// <param name="peticion">Traslado, tipo de novedad, tratamiento y descripcion.</param>
     /// <param name="usuarioId">
     /// Quien reporta, del token. Una novedad puede acabar en un reclamo a la
     /// transportadora, y entonces quien la firmo es justamente lo que se alega.
@@ -154,5 +160,45 @@ public interface ITransferenciasService
     Task<ResultadoNovedad> RegistrarNovedadAsync(
         RegistrarNovedadDto peticion,
         int usuarioId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Cierra una novedad que quedaba esperando desenlace, dejando escrito el
+    /// porque.
+    ///
+    /// NO BORRA NADA: la novedad se conserva entera -tipo, cantidad, quien la
+    /// reporto y cuando- y se le anade el desenlace. Es lo que permite revisar
+    /// despues por que aquel faltante no se le cobro a nadie.
+    ///
+    /// Si con esta se acaban las pendientes del traslado y estaba en
+    /// 'RecibidaParcial', el traslado pasa a 'Cerrada'.
+    /// </summary>
+    /// <param name="novedadId">La novedad a cerrar. Debe estar abierta.</param>
+    /// <param name="motivo">El porque. Obligatorio.</param>
+    /// <param name="usuarioId">Quien cierra, del token.</param>
+    Task<ResultadoNovedad> CerrarNovedadAsync(
+        int novedadId,
+        string? motivo,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Informe de cumplimiento logistico: por sede y por ruta.
+    ///
+    /// TODO EN CONTEOS, nunca en volumenes: cada traslado lleva su producto en
+    /// su unidad, y sumar litros con galones daria un numero sin significado.
+    /// Lo comparable entre traslados distintos es cuantos llegaron completos y
+    /// cuantos a tiempo.
+    /// </summary>
+    /// <param name="desde">Inicio del periodo, por fecha de solicitud. Nulo no acota.</param>
+    /// <param name="hasta">Fin del periodo. Nulo no acota.</param>
+    /// <param name="sucursalId">
+    /// Acota a los traslados en que esa sede participa por cualquiera de los dos
+    /// lados. Nulo -solo el Administrador General- da la red entera.
+    /// </param>
+    Task<ReporteCumplimientoDto> ObtenerReporteCumplimientoAsync(
+        DateTime? desde = null,
+        DateTime? hasta = null,
+        int? sucursalId = null,
         CancellationToken cancellationToken = default);
 }

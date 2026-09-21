@@ -4,23 +4,39 @@ import { Modal } from '../ui/Modal';
 import { Boton } from '../ui/Boton';
 import { Alerta } from '../ui/Alerta';
 import { Spinner } from '../ui/Spinner';
-import { aNumero, CampoArea, CampoDecimal, CampoNumero, CampoSelect, CampoTexto } from '../ui/Campos';
+import { aNumero, CampoArea, CampoDecimal, CampoSelect, CampoTexto } from '../ui/Campos';
 import { useConsulta } from '../../hooks/useConsulta';
 import { useEnvio } from '../../hooks/useEnvio';
 import {
   cancelarTransferencia,
+  cerrarNovedad,
   despacharTransferencia,
   obtenerTransportadoras,
   recibirTransferencia,
   rechazarTransferencia,
   registrarNovedad,
 } from '../../services/transferencias';
-import { TIPO_NOVEDAD } from '../../models/transferencias';
-import type { TransferenciaDto, ValorTipoNovedad } from '../../models/transferencias';
-import type { TransportadoraDto } from '../../models/transferencias';
-import { formatearVolumen } from '../../utils/formato';
+import {
+  ETIQUETA_TIPO_NOVEDAD,
+  ETIQUETA_TRATAMIENTO,
+  TIPO_NOVEDAD,
+  TRATAMIENTO_NOVEDAD,
+} from '../../models/transferencias';
+import type {
+  TransferenciaDto,
+  TransportadoraDto,
+  ValorTipoNovedad,
+  ValorTratamientoNovedad,
+} from '../../models/transferencias';
+import { formatearFechaSolo, formatearVolumen } from '../../utils/formato';
 
-export type AccionTraslado = 'despacho' | 'recepcion' | 'novedad' | 'rechazo' | 'cancelacion';
+export type AccionTraslado =
+  | 'despacho'
+  | 'recepcion'
+  | 'novedad'
+  | 'cierreNovedad'
+  | 'rechazo'
+  | 'cancelacion';
 
 const SIN_TRANSPORTADORAS: TransportadoraDto[] = [];
 
@@ -30,6 +46,7 @@ const TITULOS: Record<AccionTraslado, string> = {
   // Lo mismo que dice el botón que lo abre: uno que promete una cosa y abre
   // otra titulada distinto hace dudar de si se pulsó lo que se quería.
   novedad: 'Novedad de traslado',
+  cierreNovedad: 'Cerrar novedad del traslado',
   rechazo: 'Rechazar traslado',
   cancelacion: 'Cancelar traslado',
 };
@@ -46,16 +63,24 @@ const ETIQUETA_ENVIO: Record<AccionTraslado, string> = {
   despacho: 'Despachar traslado',
   recepcion: 'Recibir traslado',
   novedad: 'Guardar novedad',
+  cierreNovedad: 'Cerrar novedad',
   rechazo: 'Rechazar traslado',
   cancelacion: 'Cancelar traslado',
 };
 
 const DESCRIPCIONES: Record<AccionTraslado, string> = {
-  despacho: 'Lo hace la sede origen. Descuenta stock por FEFO y el traslado pasa a En tránsito.',
-  recepcion: 'Lo hace la sede destino. Sin cantidad, llega todo lo despachado.',
+  despacho:
+    'Lo hace la sede origen. Se puede ajustar la cantidad a lo que de verdad haya en el ' +
+    'estante. Descuenta stock por FEFO y el traslado pasa a En tránsito.',
+  recepcion:
+    'Lo hace la sede destino, y no antes del día de llegada. Sin cantidad, llega todo lo ' +
+    'despachado.',
   novedad:
-    'Ya entró lo que llegó y el traslado quedó corto. Aquí se deja constancia de qué pasó con ' +
-    'el faltante. NO mueve stock: esa cantidad ya salió del inventario de la red.',
+    'Ya entró lo que llegó y el traslado quedó corto. Aquí se deja constancia y se decide qué ' +
+    'se hace con el faltante. NO mueve stock: esa cantidad ya salió del inventario de la red.',
+  cierreNovedad:
+    'El desenlace de algo que quedó pendiente. No borra la novedad: le añade el porqué, la ' +
+    'fecha y quién la cerró.',
   rechazo: 'Lo hace la sede origen, solo desde Solicitada. La mercancía no sale.',
   cancelacion: 'La retira quien la pidió, solo desde Solicitada.',
 };
@@ -78,28 +103,29 @@ function hoyMas(dias: number): string {
 }
 
 /**
- * El texto que acompaña al faltante anotado como merma.
+ * El texto que acompaña al faltante, según lo que se haya decidido hacer.
  *
  * Nombra a la transportadora a propósito: el faltante es, antes que una merma,
- * un reclamo contra quien lo transportó. Si se resuelve con ella, la mercancía
- * aparece y esto queda como el historial de lo que pasó; si no, esta anotación
- * ES la merma. Sin el nombre, dentro de un mes nadie sabe a quién reclamarle.
+ * un reclamo contra quien lo transportó. Sin el nombre, dentro de un mes nadie
+ * sabe a quién reclamarle.
  */
-function ConstruirNotaMerma(
+function notaDelFaltante(
+  tratamiento: ValorTratamientoNovedad,
   transportadora: string | null,
   observaciones: string | null,
 ): string {
-  const partes = [
-    transportadora === null
-      ? 'Faltante en traslado, sin transportadora registrada.'
-      : `Faltante en traslado con ${transportadora}. Reclamar antes de darlo por perdido.`,
-  ];
+  const quien = transportadora === null ? 'la transportadora (sin registrar)' : transportadora;
 
-  if (observaciones !== null) {
-    partes.push(observaciones);
-  }
+  const cabecera =
+    tratamiento === TRATAMIENTO_NOVEDAD.reenvio
+      ? 'Faltante en tránsito. Se pide REENVÍO del origen; el traslado sigue pendiente hasta ' +
+        'que llegue.'
+      : tratamiento === TRATAMIENTO_NOVEDAD.reclamacion
+        ? `Faltante en tránsito. Se RECLAMA a ${quien}; el traslado sigue pendiente hasta ` +
+          'tener respuesta.'
+        : `Faltante en tránsito con ${quien}. Se da por perdido: esto es la merma.`;
 
-  return partes.join(' ');
+  return observaciones === null ? cabecera : `${cabecera} ${observaciones}`;
 }
 
 interface AccionesTrasladoProps {
@@ -110,10 +136,10 @@ interface AccionesTrasladoProps {
 }
 
 /**
- * Las cinco acciones sobre un traslado ya creado.
+ * Las acciones sobre un traslado ya creado.
  *
- * Van en un componente y no en cinco porque comparten casi todo -el modal, el
- * estado de envío, el pie- y se diferencian en dos o tres campos. Cinco archivos
+ * Van en un componente y no en seis porque comparten casi todo -el modal, el
+ * estado de envío, el pie- y se diferencian en dos o tres campos. Seis archivos
  * casi idénticos es como terminan divergiendo en el manejo de errores.
  */
 export function AccionesTraslado({
@@ -130,14 +156,32 @@ export function AccionesTraslado({
     SIN_TRANSPORTADORAS,
   );
 
+  const solicitada = traslado.cantidadSolicitada;
+  // Lo que salió de verdad. El `??` cubre los traslados despachados antes de
+  // que la columna existiera, que salieron por lo pedido.
+  const despachada = traslado.cantidadDespachada ?? solicitada;
+
+  const abiertas = traslado.novedades.filter((n) => n.estado === 'Abierta');
+
   const [transportadoraId, setTransportadoraId] = useState('');
   const [guia, setGuia] = useState('');
   const [fechaEstimada, setFechaEstimada] = useState('');
+  // Arranca en lo pedido, con coma decimal: lo normal es despachar todo, y el
+  // ajuste es la excepción. Vacío obligaría a teclearlo en cada despacho.
+  const [cantidadDespachada, setCantidadDespachada] = useState(
+    solicitada === null ? '' : String(solicitada).replace('.', ','),
+  );
   const [cantidadRecibida, setCantidadRecibida] = useState('');
+  const [tratamientoFaltante, setTratamientoFaltante] = useState('');
   const [tipoNovedad, setTipoNovedad] = useState(String(TIPO_NOVEDAD.retraso));
+  const [tratamientoNovedad, setTratamientoNovedad] = useState(
+    String(TRATAMIENTO_NOVEDAD.ninguno),
+  );
   const [cantidadAfectada, setCantidadAfectada] = useState('');
+  const [novedadElegida, setNovedadElegida] = useState(
+    abiertas.length > 0 ? String(abiertas[0].id) : '',
+  );
   const [texto, setTexto] = useState('');
-  const [registrarMerma, setRegistrarMerma] = useState(true);
   const [validacion, setValidacion] = useState<string | null>(null);
 
   const transportadoraElegida =
@@ -146,17 +190,13 @@ export function AccionesTraslado({
   /**
    * Al elegir transportadora se CALCULA la fecha de llegada.
    *
-   * Antes el campo estaba ahí, vacío y marcado como opcional, y lo normal era
-   * dejarlo así: un traslado en tránsito sin fecha no se puede reclamar, porque
-   * no hay a partir de cuándo decir que va tarde.
-   *
    * Los días salen de la transportadora, no de una constante en esta pantalla:
    * «urgente» es una etiqueta comercial, no un plazo, y el día que una cambie el
    * suyo se corrige en la tabla y no aquí.
    *
-   * SE PUEDE CORREGIR A MANO después. El cálculo es el punto de partida
-   * razonable, no una imposición: si se pactó otra fecha con el transportador,
-   * manda esa.
+   * SE PUEDE CORREGIR A MANO después, y ahora eso pesa más que antes: esta
+   * fecha es la que habilita el botón de recibir, así que ponerla muy lejos
+   * deja al destino sin poder recibir mercancía que ya tiene delante.
    */
   function elegirTransportadora(valor: string) {
     setTransportadoraId(valor);
@@ -168,26 +208,42 @@ export function AccionesTraslado({
   }
 
   /**
+   * Lo que el origen NO va a mandar, según lo que se está escribiendo.
+   *
+   * NO ES UNA PÉRDIDA y el aviso lo dice: esa mercancía no sale, se queda en el
+   * estante del origen. Confundirla con el faltante de tránsito sería cargarle
+   * a la transportadora algo que nunca subió al camión.
+   */
+  const sinDespachar = (() => {
+    if (accion !== 'despacho' || solicitada === null) {
+      return null;
+    }
+    const escrita = aNumero(cantidadDespachada);
+    if (escrita === null || escrita >= solicitada) {
+      return null;
+    }
+    return Math.round((solicitada - escrita) * 10000) / 10000;
+  })();
+
+  /**
    * Cuánto falta por llegar según lo que se está escribiendo.
    *
-   * Se calcula MIENTRAS SE TECLEA y no al enviar: el aviso de merma tiene que
-   * aparecer en el momento en que quien descarga escribe una cifra menor, que es
-   * cuando todavía puede contar otra vez.
+   * SE MIDE CONTRA LO DESPACHADO, no contra lo solicitado: si el origen ajustó
+   * el envío a 3 de los 5 pedidos y llegan 3, no falta nada.
    *
-   * Nulo cuando el campo está vacío -sin cantidad se recibe todo- o cuando lo
-   * escrito no es un número menor que lo solicitado.
+   * Se calcula MIENTRAS SE TECLEA y no al enviar: el aviso tiene que aparecer
+   * en el momento en que quien descarga escribe una cifra menor, que es cuando
+   * todavía puede contar otra vez.
    */
   const faltante = (() => {
-    if (accion !== 'recepcion' || cantidadRecibida.trim() === '') {
+    if (accion !== 'recepcion' || despachada === null) {
       return null;
     }
-    const recibida = Number(cantidadRecibida);
-    const solicitada = traslado.cantidadSolicitada;
-    if (!Number.isFinite(recibida) || solicitada === null || recibida >= solicitada) {
+    const recibida = aNumero(cantidadRecibida);
+    if (recibida === null || recibida >= despachada) {
       return null;
     }
-    // A 4 decimales, que es la escala de `transferencias.cantidad_solicitada`.
-    return Math.round((solicitada - recibida) * 10000) / 10000;
+    return Math.round((despachada - recibida) * 10000) / 10000;
   })();
 
   function alGuardar() {
@@ -207,41 +263,80 @@ export function AccionesTraslado({
         if (fechaEstimada === '') {
           setValidacion(
             'La fecha estimada de llegada es obligatoria: es con lo que se sabe si el traslado ' +
-              'va tarde. Elige la transportadora y se calcula sola.',
+              'va tarde, y es la que habilita la recepción. Elige la transportadora y se ' +
+              'calcula sola.',
           );
           return;
         }
+
+        const aDespachar = aNumero(cantidadDespachada);
+        if (aDespachar === null || aDespachar <= 0) {
+          setValidacion(
+            'Indica cuánto se despacha. Si no se puede mandar nada, rechaza el traslado en vez ' +
+              'de despachar cero: así queda dicho por qué.',
+          );
+          return;
+        }
+        if (solicitada !== null && aDespachar > solicitada) {
+          setValidacion(
+            `No se puede despachar más de lo pedido (${formatearVolumen(
+              solicitada,
+              traslado.unidadSimbolo,
+            )}). El ajuste sirve para mandar menos.`,
+          );
+          return;
+        }
+
         await despacharTransferencia(traslado.id, {
           transferenciaId: traslado.id,
           transportadoraId: Number(transportadoraId),
           guia: guia.trim(),
           fechaEstimadaLlegada: fechaEstimada === '' ? null : fechaEstimada,
+          cantidadDespachada: aDespachar,
           observaciones,
         });
       } else if (accion === 'recepcion') {
+        // EL TRATAMIENTO SE DECIDE AQUÍ, en el mismo paso en que se cuenta lo
+        // que llegó. Preguntarlo después, en otra pantalla, es como el faltante
+        // se queda sin decidir: quien descarga ya se fue.
+        if (faltante !== null && tratamientoFaltante === '') {
+          setValidacion(
+            'Falta mercancía: hay que decir qué se hace con ella. Reenvío y reclamación dejan ' +
+              'el traslado pendiente; asumirla lo cierra como merma.',
+          );
+          return;
+        }
+
         await recibirTransferencia(traslado.id, {
           transferenciaId: traslado.id,
-          cantidadRecibida: cantidadRecibida === '' ? null : Number(cantidadRecibida),
+          cantidadRecibida: aNumero(cantidadRecibida),
           observaciones,
         });
 
-        // LA MERMA VA DESPUES DE RECIBIR, y en dos llamadas, no en una.
+        // LA NOVEDAD VA DESPUÉS DE RECIBIR, y en dos llamadas, no en una.
         //
         // Son dos hechos distintos: cuánto entró al saldo -que lo decide la
-        // recepción- y cuánto se perdió en el camino -que es el faltante-. Si
-        // la recepción falla, no hay faltante que anotar; al revés, si falla la
-        // anotación, la mercancía ya entró y eso no se deshace.
+        // recepción- y qué se hace con lo que faltó. Si la recepción falla, no
+        // hay faltante que anotar; al revés, si falla la anotación, la
+        // mercancía ya entró y eso no se deshace.
         //
         // NO MUEVE STOCK, y es deliberado: lo que faltó salió del origen al
         // despachar y nunca entró al destino, así que YA está descontado de la
         // red. Un movimiento de merma volvería a restarlo y el inventario
         // quedaría por debajo de lo que hay en los estantes.
-        if (registrarMerma && faltante !== null) {
+        if (faltante !== null) {
+          const tratamiento = Number(tratamientoFaltante) as ValorTratamientoNovedad;
+
           await registrarNovedad(traslado.id, {
             transferenciaId: traslado.id,
             tipo: TIPO_NOVEDAD.faltante,
             cantidadAfectada: faltante,
-            observaciones: ConstruirNotaMerma(traslado.transportadoraNombre, observaciones),
+            tratamiento,
+            observaciones: notaDelFaltante(
+              tratamiento,
+              traslado.transportadoraNombre,
+              observaciones,
+            ),
           });
         }
       } else if (accion === 'novedad') {
@@ -251,8 +346,23 @@ export function AccionesTraslado({
           tipo: Number(tipoNovedad) as ValorTipoNovedad,
           // `aNumero` convierte la coma en punto: Number('0,5') es NaN.
           cantidadAfectada: aNumero(cantidadAfectada),
+          tratamiento: Number(tratamientoNovedad) as ValorTratamientoNovedad,
           observaciones,
         });
+      } else if (accion === 'cierreNovedad') {
+        if (novedadElegida === '') {
+          setValidacion('No hay ninguna novedad pendiente que cerrar en este traslado.');
+          return;
+        }
+        if (observaciones === null) {
+          setValidacion(
+            'Hay que decir POR QUÉ se cierra: si llegó lo que faltaba, si lo respondió la ' +
+              'transportadora o si se da por perdido. Es lo único que queda para revisarlo ' +
+              'después.',
+          );
+          return;
+        }
+        await cerrarNovedad(traslado.id, Number(novedadElegida), { motivo: observaciones });
       } else if (accion === 'rechazo') {
         await rechazarTransferencia(traslado.id, { motivo: observaciones });
       } else {
@@ -294,14 +404,55 @@ export function AccionesTraslado({
 
         <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
           <span className="font-semibold text-slate-900">{traslado.productoNombre}</span> ·{' '}
-          {traslado.sucursalOrigenNombre} → {traslado.sucursalDestinoNombre} ·{' '}
-          <span className="tabular-nums">
-            {formatearVolumen(traslado.cantidadSolicitada, traslado.unidadSimbolo)}
+          {traslado.sucursalOrigenNombre} → {traslado.sucursalDestinoNombre}
+          <span className="mt-1 block tabular-nums">
+            Pedido: {formatearVolumen(solicitada, traslado.unidadSimbolo)}
+            {/* Las dos cifras juntas cuando difieren: quien recibe tiene que
+                saber contra qué está contando, y no es contra lo que se pidió. */}
+            {traslado.cantidadDespachada !== null &&
+            solicitada !== null &&
+            traslado.cantidadDespachada < solicitada ? (
+              <>
+                {' · '}
+                <span className="font-semibold text-terracota-700">
+                  Despachado: {formatearVolumen(traslado.cantidadDespachada, traslado.unidadSimbolo)}
+                </span>
+              </>
+            ) : null}
+            {traslado.fechaEstimadaLlegada === null ? null : (
+              <> · Llegada prevista: {formatearFechaSolo(traslado.fechaEstimadaLlegada)}</>
+            )}
           </span>
         </div>
 
         {accion === 'despacho' ? (
           <>
+            {/*
+              EL AJUSTE VA PRIMERO, antes de la transportadora: es la pregunta
+              que se hace mirando el estante -«¿cuánto tengo?»- y pasa antes que
+              llamar al transportador.
+            */}
+            <CampoDecimal
+              etiqueta={`Cantidad a despachar (${traslado.unidadSimbolo})`}
+              valor={cantidadDespachada}
+              onCambio={setCantidadDespachada}
+              requerido
+              disabled={enviando}
+              ayuda={`Pedido: ${formatearVolumen(solicitada, traslado.unidadSimbolo)}. Bájala si no hay todo; no se puede subir.`}
+            />
+
+            {sinDespachar !== null ? (
+              <Alerta tipo="info">
+                Se despacharán{' '}
+                <strong className="font-semibold">
+                  {formatearVolumen(sinDespachar, traslado.unidadSimbolo)} menos
+                </strong>{' '}
+                de lo pedido. Eso NO es un faltante ni una merma: esa mercancía no sale, se queda
+                en {traslado.sucursalOrigenNombre}. Si {traslado.sucursalDestinoNombre} la sigue
+                necesitando, hay que pedirla en otro traslado.
+              </Alerta>
+            ) : null}
+
             <CampoSelect
               etiqueta="Transportadora"
               valor={transportadoraId}
@@ -340,7 +491,7 @@ export function AccionesTraslado({
                       // encadenarlo con una frase daba «S.A..».
                       `${transportadoraElegida.diasEntrega} ${
                         transportadoraElegida.diasEntrega === 1 ? 'día' : 'días'
-                      } de ${transportadoraElegida.nombre} · cámbiala si pactaste otra fecha`
+                      } de ${transportadoraElegida.nombre} · habilita la recepción ese día`
                 }
               />
             </div>
@@ -349,42 +500,55 @@ export function AccionesTraslado({
 
         {accion === 'recepcion' ? (
           <>
-            <CampoNumero
-              etiqueta="Cantidad recibida"
+            <CampoDecimal
+              etiqueta={`Cantidad recibida (${traslado.unidadSimbolo})`}
               valor={cantidadRecibida}
               onCambio={setCantidadRecibida}
               disabled={enviando}
-              ayuda="Vacía recibe todo lo despachado. Cuenta antes de escribir: esta cifra es la que entra al saldo."
+              placeholder={despachada === null ? '' : String(despachada).replace('.', ',')}
+              ayuda={`Vacía recibe todo lo despachado (${formatearVolumen(despachada, traslado.unidadSimbolo)}). Cuenta antes de escribir: esta cifra es la que entra al saldo.`}
             />
 
             {/*
               Solo cuando de verdad falta algo. Un recuadro permanente que
-              pregunta por la merma en cada recepción se acaba ignorando, y
+              pregunta por el faltante en cada recepción se acaba ignorando, y
               entonces no avisa el día que importa.
             */}
             {faltante !== null ? (
-              <div className="flex flex-col gap-2 rounded-xl border border-terracota-300 bg-terracota-50 px-4 py-3">
+              <div className="flex flex-col gap-3 rounded-xl border border-terracota-300 bg-terracota-50 px-4 py-3">
                 <p className="flex items-center gap-2 text-sm font-semibold text-terracota-800">
                   <AlertTriangle size={16} aria-hidden="true" />
-                  Faltan {formatearVolumen(faltante, traslado.unidadSimbolo)}
+                  Faltan {formatearVolumen(faltante, traslado.unidadSimbolo)} de los{' '}
+                  {formatearVolumen(despachada, traslado.unidadSimbolo)} despachados
                 </p>
 
-                <label className="flex items-start gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={registrarMerma}
-                    onChange={(evento) => setRegistrarMerma(evento.target.checked)}
-                    disabled={enviando}
-                    className="mt-0.5 h-4 w-4 shrink-0 accent-terracota-600"
-                  />
-                  <span>
-                    Anotar el faltante como <strong className="font-semibold">merma</strong>
-                    {traslado.transportadoraNombre === null
-                      ? ''
-                      : `, para reclamárselo a ${traslado.transportadoraNombre}`}
-                    .
-                  </span>
-                </label>
+                <CampoSelect
+                  etiqueta="Qué se hace con el faltante"
+                  valor={tratamientoFaltante}
+                  onCambio={setTratamientoFaltante}
+                  disabled={enviando}
+                  requerido
+                  placeholder="Elige el tratamiento"
+                  opciones={[
+                    {
+                      valor: String(TRATAMIENTO_NOVEDAD.reclamacion),
+                      texto: `Reclamar${
+                        traslado.transportadoraNombre === null
+                          ? ' a la transportadora'
+                          : ` a ${traslado.transportadoraNombre}`
+                      } — queda pendiente`,
+                    },
+                    {
+                      valor: String(TRATAMIENTO_NOVEDAD.reenvio),
+                      texto: `Pedir reenvío a ${traslado.sucursalOrigenNombre} — queda pendiente`,
+                    },
+                    {
+                      valor: String(TRATAMIENTO_NOVEDAD.asumido),
+                      texto: 'Darlo por perdido (merma) — cierra el traslado',
+                    },
+                  ]}
+                  ayuda="Reenvío y reclamación dejan el traslado en «por recibir» hasta que se resuelva."
+                />
 
                 {/*
                   Hay que decir que NO vuelve a descontar. Quien lo lee espera
@@ -394,9 +558,9 @@ export function AccionesTraslado({
                   con menos producto del que hay en los estantes.
                 */}
                 <p className="text-xs text-slate-600">
-                  No vuelve a descontar stock: esa cantidad salió del origen al despachar y nunca
-                  llegó, así que ya está fuera del inventario de la red. Queda anotada con la
-                  transportadora para poder reclamar, y si no se recupera, es la merma.
+                  Ninguna de las tres vuelve a descontar stock: esa cantidad salió del origen al
+                  despachar y nunca llegó, así que ya está fuera del inventario de la red. Queda
+                  anotada con la transportadora y la guía para poder reclamar.
                 </p>
               </div>
             ) : null}
@@ -431,15 +595,95 @@ export function AccionesTraslado({
               placeholder="0,5"
               ayuda="Opcional. Solo números, con coma decimal."
             />
+
+            <CampoSelect
+              etiqueta="Tratamiento"
+              valor={tratamientoNovedad}
+              onCambio={setTratamientoNovedad}
+              disabled={enviando}
+              opciones={[
+                {
+                  valor: String(TRATAMIENTO_NOVEDAD.ninguno),
+                  texto: 'Solo dejar constancia — no deja pendiente',
+                },
+                {
+                  valor: String(TRATAMIENTO_NOVEDAD.reclamacion),
+                  texto: 'Reclamación a la transportadora — queda pendiente',
+                },
+                {
+                  valor: String(TRATAMIENTO_NOVEDAD.reenvio),
+                  texto: 'Reenvío desde el origen — queda pendiente',
+                },
+                {
+                  valor: String(TRATAMIENTO_NOVEDAD.asumido),
+                  texto: 'Asumido como merma — cierra el traslado',
+                },
+              ]}
+              ayuda="Las dos del medio mantienen el traslado en «por recibir» hasta que se cierren."
+            />
           </>
         ) : null}
 
+        {accion === 'cierreNovedad' ? (
+          abiertas.length === 0 ? (
+            <Alerta tipo="info">
+              Este traslado no tiene novedades pendientes. Puede que otra persona ya la haya
+              cerrado; recarga la lista para verlo.
+            </Alerta>
+          ) : (
+            <>
+              {/*
+                El selector aparece siempre, incluso con una sola: con una, deja
+                a la vista QUÉ se está cerrando -el tipo, la cantidad- en vez de
+                pedir un motivo para algo que no se nombra.
+              */}
+              <CampoSelect
+                etiqueta="Novedad pendiente"
+                valor={novedadElegida}
+                onCambio={setNovedadElegida}
+                disabled={enviando || abiertas.length === 1}
+                opciones={abiertas.map((n) => ({
+                  valor: String(n.id),
+                  texto: `${n.tipo === null ? 'Novedad' : ETIQUETA_TIPO_NOVEDAD[n.tipo]}${
+                    n.cantidadAfectada === null
+                      ? ''
+                      : ` de ${formatearVolumen(n.cantidadAfectada, traslado.unidadSimbolo)}`
+                  } — ${ETIQUETA_TRATAMIENTO[n.tratamiento]} · ${formatearFechaSolo(n.fecha)}`,
+                }))}
+              />
+
+              <Alerta tipo="info">
+                Cerrarla <strong className="font-semibold">no borra nada</strong>: el reporte
+                original conserva su tipo, su cantidad, quién lo firmó y cuándo. Lo que se añade
+                es el desenlace. Si es la última pendiente, el traslado sale de «por recibir».
+              </Alerta>
+            </>
+          )
+        ) : null}
+
         <CampoArea
-          etiqueta={accion === 'rechazo' || accion === 'cancelacion' ? 'Motivo' : 'Observaciones'}
+          etiqueta={
+            accion === 'rechazo' || accion === 'cancelacion'
+              ? 'Motivo'
+              : accion === 'cierreNovedad'
+                ? 'Por qué se cierra'
+                : 'Observaciones'
+          }
           valor={texto}
           onCambio={setTexto}
           disabled={enviando}
-          placeholder={accion === 'rechazo' ? 'Por qué no se atiende' : 'Opcional'}
+          placeholder={
+            accion === 'rechazo'
+              ? 'Por qué no se atiende'
+              : accion === 'cierreNovedad'
+                ? 'Llegó el reenvío completo / la transportadora abonó el faltante / se da por perdido…'
+                : 'Opcional'
+          }
+          ayuda={
+            accion === 'cierreNovedad'
+              ? 'Obligatorio. Es lo único que queda para entender, dentro de seis meses, qué pasó con esa mercancía.'
+              : undefined
+          }
         />
       </div>
     </Modal>
