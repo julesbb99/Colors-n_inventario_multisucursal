@@ -124,7 +124,8 @@ public class AppDbContext : DbContext
     // Debe coincidir valor por valor, y en el mismo orden, con el enum
     // EstadoTransferencia del dominio.
     private const string EnumEstadoTransferencia =
-        "enum('Solicitada','EnTransito','Completada','RecibidaParcial','Rechazada','Cancelada')";
+        "enum('Solicitada','EnTransito','Completada','RecibidaParcial'," +
+        "'Cerrada','Rechazada','Cancelada')";
     private const string EnumUrgencia = "enum('Baja','Media','Alta')";
     private const string EnumTipoNovedad = "enum('Faltante','Averia','Sobrante','Retraso')";
     private const string EnumTipoMovimiento = "enum('Ingreso','Retiro')";
@@ -730,6 +731,7 @@ public class AppDbContext : DbContext
              .HasColumnName("dias_entrega")
              .HasColumnType("tinyint unsigned")
              .IsRequired();
+            e.Property(x => x.Activo).HasColumnName("activo").IsRequired();
         });
 
         modelBuilder.Entity<Transferencia>(e =>

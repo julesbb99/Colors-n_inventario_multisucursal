@@ -44,8 +44,24 @@ public enum EstadoTransferencia
     /// <summary>Llego todo lo que se pidio.</summary>
     Completada,
 
-    /// <summary>Llego menos de lo despachado. La diferencia se perdio en transito.</summary>
+    /// <summary>
+    /// Llego menos de lo despachado y todavia falta dar cuenta del faltante.
+    /// La diferencia ya salio del inventario de la red.
+    /// </summary>
     RecibidaParcial,
+
+    /// <summary>
+    /// Llego corto y ya se dio cuenta del faltante con una novedad: se acabo.
+    ///
+    /// NO ES <see cref="Completada"/>, y la distincion importa: aquella afirma
+    /// que llego todo. Esta dice que se termino de gestionar aunque faltara
+    /// mercancia, y <c>CantidadRecibida</c> sigue guardando cuanto llego.
+    ///
+    /// Existe porque sin ella un traslado corto se quedaba en
+    /// <see cref="RecibidaParcial"/> para siempre, contando como trabajo en
+    /// curso cuando ya no habia nada que hacer con el.
+    /// </summary>
+    Cerrada,
 
     /// <summary>La sede origen no la atiende.</summary>
     Rechazada,

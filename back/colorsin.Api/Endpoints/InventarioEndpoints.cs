@@ -284,34 +284,24 @@ public static class InventarioEndpoints
         //
         // Ninguna de las dos cambia cantidades: para eso esta el movimiento.
         // ---------------------------------------------------------------------
-        grupo.MapPost("/lotes", async (
-                CrearLoteDto peticion,
-                IInventarioService inventario,
-                IUsuarioContexto contexto,
-                CancellationToken cancellationToken) =>
-            {
-                contexto.ExigirAccesoASucursal(peticion.SucursalId);
-
-                var resultado = await inventario.CrearLoteAsync(
-                    peticion, contexto.UsuarioIdRequerido(), cancellationToken);
-
-                return resultado.Exito
-                    ? Results.Created($"/api/inventario/lotes/{resultado.Lote!.Id}", resultado)
-                    : RespuestasHttp.Fallo(
-                        CodigoDe(resultado.Error), "Lote rechazado", resultado.Mensaje);
-            })
-            .WithName("InventarioCrearLote")
-            .WithSummary("Abre un lote nuevo, vacio. Solo supervision.")
-            .WithDescription(
-                "NO recibe cantidad, a proposito: el saldo de una sede vive a la vez en el " +
-                "consolidado y en el desglose por lote, y crear un lote con cantidad lo " +
-                "sumaria solo al desglose, sin fila en el libro mayor que diga de donde salio. " +
-                "El lote nace en cero y la mercancia entra con POST /api/inventario/movimientos " +
-                "indicando `loteId`, o con una recepcion de compra. " +
-                "El numero de lote es unico dentro de la pareja (producto, sede): si vuelve a " +
-                "llegar el mismo, se le suma cantidad en vez de abrir otro.")
-            .Produces<ResultadoLote>(StatusCodes.Status201Created)
-            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+        // AQUI VIVIA POST /lotes, que abria un lote vacio a mano. Se quito, y
+        // conviene dejar escrito por que, porque el hueco se nota.
+        //
+        // UN LOTE NO ES UN DATO NUESTRO. El numero y el vencimiento los pone el
+        // fabricante y llegan impresos en el envase; no se sabe cuales son hasta
+        // que el camion descarga. Teclearlos por adelantado solo podia producir
+        // dos cosas: lotes inventados que no coinciden con ninguna caja, o lotes
+        // vacios esperando una mercancia que quiza llegue con otro numero.
+        //
+        // POR DONDE NACEN AHORA, que es por donde nacian de verdad igualmente:
+        //
+        //   - la recepcion de una compra, con el numero que trae la factura;
+        //   - la recepcion de un traslado, que recrea en el destino el lote que
+        //     salio del origen, con su mismo numero y vencimiento.
+        //
+        // Las dos los crean desde el servicio, no por este endpoint, asi que
+        // quitarlo no deja nada sin cubrir. Editar un lote -PUT, aqui abajo- si
+        // sigue: corregir una fecha mal leida es otra cosa que inventarla.
 
         grupo.MapPut("/lotes/{id:int}", async (
                 int id,

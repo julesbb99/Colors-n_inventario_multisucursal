@@ -55,11 +55,210 @@ public sealed class TransferenciasService : ITransferenciasService
     // =========================================================================
 
     public async Task<IReadOnlyList<TransportadoraDto>> ObtenerTransportadorasAsync(
+        bool incluirRetiradas = false,
         CancellationToken cancellationToken = default)
     {
-        var transportadoras = await _transportadoras.ObtenerTodasAsync(cancellationToken);
+        var transportadoras = await _transportadoras.ObtenerTodasAsync(
+            incluirRetiradas, cancellationToken);
+
         return transportadoras.Select(t => t.ToDto()).ToList();
     }
+
+    // =========================================================================
+    // CATALOGO DE TRANSPORTADORAS
+    // =========================================================================
+
+    public async Task<ResultadoTransportadora> CrearTransportadoraAsync(
+        GuardarTransportadoraDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        var validacion = await ValidarTransportadoraAsync(peticion, null, cancellationToken);
+        if (validacion is not null)
+        {
+            return validacion;
+        }
+
+        var transportadora = new Transportadora
+        {
+            Nombre = peticion.Nombre.Trim(),
+            TipoServicio = LeerTipoServicio(peticion.TipoServicio)!.Value,
+            DiasEntrega = peticion.DiasEntrega
+        };
+
+        _transportadoras.Agregar(transportadora);
+        await _transportadoras.GuardarCambiosAsync(cancellationToken);
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo, "CrearTransportadora", usuarioId,
+            $"transportadora={transportadora.Id} | nombre='{transportadora.Nombre}' | " +
+            $"tipo={transportadora.TipoServicio} | diasEntrega={transportadora.DiasEntrega}",
+            cancellationToken);
+
+        await _transportadoras.GuardarCambiosAsync(cancellationToken);
+
+        return ResultadoTransportadora.Ok(
+            transportadora.ToDto(),
+            $"Transportadora '{transportadora.Nombre}' creada con un plazo de " +
+            $"{transportadora.DiasEntrega} dia(s).");
+    }
+
+    public async Task<ResultadoTransportadora> ActualizarTransportadoraAsync(
+        int id,
+        GuardarTransportadoraDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        // Con seguimiento: esta fila se modifica.
+        var transportadora = await _transportadoras.ObtenerParaActualizarAsync(
+            id, cancellationToken);
+
+        if (transportadora is null)
+        {
+            return ResultadoTransportadora.Fallo(
+                ErrorTransportadora.NoEncontrada,
+                $"No existe la transportadora {id}.");
+        }
+
+        var validacion = await ValidarTransportadoraAsync(peticion, id, cancellationToken);
+        if (validacion is not null)
+        {
+            return validacion;
+        }
+
+        var antes =
+            $"'{transportadora.Nombre}' {transportadora.TipoServicio} " +
+            $"{transportadora.DiasEntrega}d";
+
+        transportadora.Nombre = peticion.Nombre.Trim();
+        transportadora.TipoServicio = LeerTipoServicio(peticion.TipoServicio)!.Value;
+        transportadora.DiasEntrega = peticion.DiasEntrega;
+
+        await _transportadoras.GuardarCambiosAsync(cancellationToken);
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo, "ActualizarTransportadora", usuarioId,
+            $"transportadora={id} | {antes} -> '{transportadora.Nombre}' " +
+            $"{transportadora.TipoServicio} {transportadora.DiasEntrega}d",
+            cancellationToken);
+
+        await _transportadoras.GuardarCambiosAsync(cancellationToken);
+
+        return ResultadoTransportadora.Ok(
+            transportadora.ToDto(),
+            $"Transportadora '{transportadora.Nombre}' actualizada. El cambio de plazo afecta a " +
+            "los despachos que vengan; los ya despachados conservan su fecha estimada.");
+    }
+
+    public async Task<ResultadoTransportadora> CambiarEstadoTransportadoraAsync(
+        int id,
+        bool activa,
+        int usuarioId,
+        CancellationToken cancellationToken = default)
+    {
+        var transportadora = await _transportadoras.ObtenerParaActualizarAsync(
+            id, cancellationToken);
+
+        if (transportadora is null)
+        {
+            return ResultadoTransportadora.Fallo(
+                ErrorTransportadora.NoEncontrada,
+                $"No existe la transportadora {id}.");
+        }
+
+        if (transportadora.Activo == activa)
+        {
+            return ResultadoTransportadora.Fallo(
+                ErrorTransportadora.EstadoSinCambio,
+                $"La transportadora '{transportadora.Nombre}' ya estaba " +
+                $"{(activa ? "activa" : "retirada")}.");
+        }
+
+        transportadora.Activo = activa;
+        await _transportadoras.GuardarCambiosAsync(cancellationToken);
+
+        await _auditoria.RegistrarEventoAsync(
+            Modulo,
+            activa ? "ReactivarTransportadora" : "RetirarTransportadora",
+            usuarioId,
+            $"transportadora={id} | nombre='{transportadora.Nombre}' | " +
+            $"activo={(activa ? "0->1" : "1->0")}",
+            cancellationToken);
+
+        await _transportadoras.GuardarCambiosAsync(cancellationToken);
+
+        return ResultadoTransportadora.Ok(
+            transportadora.ToDto(),
+            activa
+                ? $"Transportadora '{transportadora.Nombre}' reactivada: vuelve a ofrecerse al " +
+                  "despachar."
+                : $"Transportadora '{transportadora.Nombre}' retirada. No se borro: los traslados " +
+                  "que llevo la siguen citando, con su guia y su fecha.");
+    }
+
+    /// <summary>
+    /// Lo comun a crear y editar. Devuelve el rechazo, o <c>null</c> si todo
+    /// esta bien.
+    ///
+    /// Va en un solo sitio a proposito: dos copias de estas cuatro reglas es
+    /// como el alta termina aceptando lo que la edicion rechaza.
+    /// </summary>
+    private async Task<ResultadoTransportadora?> ValidarTransportadoraAsync(
+        GuardarTransportadoraDto peticion,
+        int? exceptoId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(peticion.Nombre))
+        {
+            return ResultadoTransportadora.Fallo(
+                ErrorTransportadora.NombreNoIndicado,
+                "La transportadora necesita nombre.");
+        }
+
+        if (LeerTipoServicio(peticion.TipoServicio) is null)
+        {
+            return ResultadoTransportadora.Fallo(
+                ErrorTransportadora.TipoServicioInvalido,
+                $"El tipo de servicio '{peticion.TipoServicio}' no es valido: " +
+                "solo 'urgente' o 'estandar'.");
+        }
+
+        if (peticion.DiasEntrega < 1)
+        {
+            return ResultadoTransportadora.Fallo(
+                ErrorTransportadora.DiasEntregaInvalido,
+                $"El plazo de entrega debe ser de al menos 1 dia; llego {peticion.DiasEntrega}. " +
+                "Un traslado que llega el mismo dia que sale no necesita transportadora.");
+        }
+
+        // Se comprueba antes de guardar para dar un mensaje util. No es la
+        // garantia: entre esta consulta y el INSERT cabe otra alta, y ahi lo que
+        // protege es que el catalogo sea corto y lo mantengan pocas personas.
+        if (await _transportadoras.ExisteNombreAsync(
+                peticion.Nombre, exceptoId, cancellationToken))
+        {
+            return ResultadoTransportadora.Fallo(
+                ErrorTransportadora.NombreDuplicado,
+                $"Ya hay una transportadora llamada '{peticion.Nombre.Trim()}'.");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// El tipo de servicio que llega como texto, o <c>null</c> si no es ninguno
+    /// de los dos.
+    ///
+    /// Sin distinguir mayusculas porque el DTO lo recibe como texto libre y
+    /// "Urgente" es lo que escribiria cualquiera.
+    /// </summary>
+    private static TipoServicio? LeerTipoServicio(string? valor) =>
+        valor?.Trim().ToLowerInvariant() switch
+        {
+            "urgente" => TipoServicio.Urgente,
+            "estandar" => TipoServicio.Estandar,
+            _ => null
+        };
 
     public async Task<IReadOnlyList<TransferenciaDto>> ObtenerTransferenciasAsync(
         int? sucursalOrigenId = null,
@@ -205,11 +404,25 @@ public sealed class TransferenciasService : ITransferenciasService
                 "carga llega mal o no llega.");
         }
 
-        if (!await _transportadoras.ExisteAsync(peticion.TransportadoraId, cancellationToken))
+        // Se trae la fila entera en vez de preguntar solo si existe: hay que
+        // mirar tambien que no este retirada, y el mensaje necesita su nombre.
+        var transportadora = await _transportadoras.ObtenerPorIdAsync(
+            peticion.TransportadoraId, cancellationToken);
+
+        if (transportadora is null)
         {
             return ResultadoTransferencia.Fallo(
                 ErrorTransferencia.TransportadoraNoEncontrada,
                 $"No existe la transportadora {peticion.TransportadoraId}.");
+        }
+
+        if (!transportadora.Activo)
+        {
+            return ResultadoTransferencia.Fallo(
+                ErrorTransferencia.TransportadoraRetirada,
+                $"La transportadora '{transportadora.Nombre}' esta retirada del catalogo y no " +
+                "se puede usar en despachos nuevos. Elige otra, o reactivala desde " +
+                "Traslados -> Transportadoras.");
         }
 
         // LA FECHA ESTIMADA ES OBLIGATORIA, y antes no lo era.
@@ -699,6 +912,26 @@ public sealed class TransferenciasService : ITransferenciasService
             };
             _transferencias.AgregarNovedad(novedad);
 
+            // LA NOVEDAD CIERRA EL TRASLADO QUE LLEGO CORTO, y solo ese.
+            //
+            // Dar cuenta del faltante es el ultimo paso real: a partir de ahi no
+            // queda nada que hacer con el traslado. Sin este cambio se quedaba en
+            // 'RecibidaParcial' para siempre y seguia contando como trabajo en
+            // curso, llenando la lista de pendientes de traslados terminados.
+            //
+            // SOLO DESDE RecibidaParcial. Una novedad sobre uno EnTransito es un
+            // retraso o un aviso, y ese traslado sigue viajando: cerrarlo ahi
+            // daria por terminada mercancia que aun no ha llegado. Y sobre uno ya
+            // cerrado -los danos se descubren al abrir las cajas, a veces dias
+            // despues- no hay nada que cambiar.
+            var estadoAnterior = transferencia.Estado;
+            var cierra = estadoAnterior == EstadoTransferencia.RecibidaParcial;
+
+            if (cierra)
+            {
+                transferencia.Estado = EstadoTransferencia.Cerrada;
+            }
+
             await _transferencias.GuardarCambiosAsync(ct);
 
             await _auditoria.RegistrarEventoAsync(
@@ -706,13 +939,13 @@ public sealed class TransferenciasService : ITransferenciasService
                 $"novedad={novedad.Id} | transferencia={peticion.TransferenciaId} | " +
                 $"tipo={peticion.Tipo} | " +
                 $"cantidadAfectada={(peticion.CantidadAfectada is null ? "(sin indicar)" : Num(peticion.CantidadAfectada.Value))} | " +
-                $"estadoTraslado={transferencia.Estado} (sin cambios) | " +
+                $"estadoTraslado={(cierra ? $"{estadoAnterior}->Cerrada" : $"{estadoAnterior} (sin cambios)")} | " +
                 $"obs={peticion.Observaciones ?? "(sin observaciones)"}",
                 ct);
 
             await _transferencias.GuardarCambiosAsync(ct);
 
-            return ResultadoNovedad.Ok(novedad.Id, peticion.Tipo);
+            return ResultadoNovedad.Ok(novedad.Id, peticion.Tipo, cierra);
         }, cancellationToken);
     }
 

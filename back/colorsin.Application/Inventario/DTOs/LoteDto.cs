@@ -18,7 +18,7 @@ namespace Colorsin.Application.Inventario.DTOs;
 /// <param name="CantidadBase">
 /// Saldo del lote, en unidad base del producto. Cero -o nulo- en un lote recien
 /// creado: el lote se abre vacio y la mercancia entra por un movimiento o por
-/// una recepcion de compra. Ver <see cref="CrearLoteDto"/>.
+/// una recepcion de compra, que es por donde nacen.
 /// </param>
 /// <param name="UnidadBaseSimbolo">
 /// Unidad en que esta expresada <paramref name="CantidadBase"/>. Sin ella la

@@ -100,7 +100,7 @@ public interface IInventarioService
     // NINGUNO DE ESTOS METODOS CAMBIA CANTIDADES. Un lote se crea vacio y su
     // saldo se mueve solo por el camino que ademas actualiza el consolidado de
     // la sede y deja fila en el libro mayor: un movimiento de inventario, una
-    // recepcion de compra, una venta o un traslado. Ver CrearLoteDto.
+    // recepcion de compra, una venta o un traslado.
     // =========================================================================
 
     /// <summary>
@@ -164,23 +164,21 @@ public interface IInventarioService
         int limite = 200,
         CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Abre un lote nuevo, VACIO. Ver <see cref="CrearLoteDto"/> sobre por que no
-    /// recibe cantidad.
-    ///
-    /// No lanza excepciones por reglas de negocio. Revisa
-    /// <see cref="ResultadoLote.Exito"/>.
-    /// </summary>
-    /// <param name="peticion">Producto, sede, numero y caducidad.</param>
-    /// <param name="usuarioId">
-    /// Responsable, para la auditoria. Sale del token, no del cuerpo de la
-    /// peticion; el mismo criterio que en
-    /// <see cref="RegistrarMovimientoAsync"/>.
-    /// </param>
-    Task<ResultadoLote> CrearLoteAsync(
-        CrearLoteDto peticion,
-        int usuarioId,
-        CancellationToken cancellationToken = default);
+    // AQUI ESTABA CrearLoteAsync, que abria un lote vacio a mano. Se quito junto
+    // con su endpoint, y el motivo es de negocio, no de codigo:
+    //
+    // EL NUMERO DE LOTE Y SU VENCIMIENTO LOS PONE EL FABRICANTE. Llegan impresos
+    // en el envase y no se conocen hasta que el camion descarga. Teclearlos por
+    // adelantado solo producia lotes inventados que no coincidian con ninguna
+    // caja, o lotes vacios esperando mercancia que quiza llegaba con otro numero.
+    //
+    // Los lotes nacen donde siempre nacieron de verdad: al recibir una compra
+    // -con el numero de la factura- y al recibir un traslado, que recrea en el
+    // destino el que salio del origen. Las dos pasan por RegistrarMovimientoAsync
+    // y por el servicio de traslados, no por aqui.
+    //
+    // ActualizarLoteAsync SI sigue: corregir una fecha mal leida del envase es
+    // otra cosa que inventarla.
 
     /// <summary>
     /// Corrige el numero o la caducidad de un lote existente. No toca cantidades

@@ -13,7 +13,8 @@ public static class MapeosTransferencias
         // El convertidor del AppDbContext traduce entre el enum y los valores
         // en minuscula de la base; aqui se expone el texto tal como se guarda.
         transportadora.TipoServicio == TipoServicio.Urgente ? "urgente" : "estandar",
-        transportadora.DiasEntrega);
+        transportadora.DiasEntrega,
+        transportadora.Activo);
 
     public static NovedadTransferenciaDto ToDto(this NovedadTransferencia novedad) => new(
         novedad.Id,

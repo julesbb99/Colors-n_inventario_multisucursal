@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowRight, Plus } from 'lucide-react';
+import { ArrowRight, Plus, Truck } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useSede } from '../../hooks/useSede';
 import { useConsulta } from '../../hooks/useConsulta';
@@ -14,6 +14,7 @@ import { ChipColor } from '../../components/ui/ChipColor';
 import { Alerta } from '../../components/ui/Alerta';
 import { Boton } from '../../components/ui/Boton';
 import { FormularioSolicitud } from '../../components/transferencias/FormularioSolicitud';
+import { GestionTransportadoras } from '../../components/transferencias/GestionTransportadoras';
 import { AccionesTraslado } from '../../components/transferencias/AccionesTraslado';
 import type { AccionTraslado } from '../../components/transferencias/AccionesTraslado';
 import { formatearFechaSolo, formatearVolumen } from '../../utils/formato';
@@ -30,6 +31,9 @@ const ESTADO_BADGE: Record<EstadoTransferencia, EstadoBadge> = {
   EnTransito: 'advertencia',
   RecibidaParcial: 'advertencia',
   Completada: 'exitoso',
+  // Terminada, pero NO en verde: faltó mercancía y el tono no debería felicitar
+  // por ello. Gris de cerrado, como las demás que acaban sin llegar entero.
+  Cerrada: 'inactivo',
   Rechazada: 'critico',
   Cancelada: 'inactivo',
 };
@@ -42,7 +46,12 @@ const PESTANAS: { id: Pestana; etiqueta: string }[] = [
   { id: 'cerrados', etiqueta: 'Cerrados' },
 ];
 
-/** Un traslado abierto todavía espera una acción de alguna de las dos sedes. */
+/**
+ * Un traslado abierto todavía espera una acción de alguna de las dos sedes.
+ *
+ * 'RecibidaParcial' sigue aquí porque le queda un paso: dar cuenta del
+ * faltante. Al guardar esa novedad pasa a 'Cerrada' y sale de esta lista.
+ */
 const ABIERTOS: readonly EstadoTransferencia[] = ['Solicitada', 'EnTransito', 'RecibidaParcial'];
 
 const SIN_DATOS: TransferenciaDto[] = [];
@@ -127,10 +136,12 @@ function accionesDisponibles(
 const ETIQUETA_ACCION: Record<AccionTraslado, string> = {
   despacho: 'Despachar',
   recepcion: 'Recibir',
-  // «Recibir» y no «Novedad»: en la bodega esto no es reportar una incidencia,
-  // es terminar de revisar lo que llegó. Nunca convive con el de arriba porque
-  // los dos estados son excluyentes.
-  novedad: 'Recibir',
+  // «Novedad de traslado» y NO «Recibir».
+  //
+  // Llamarlo «Recibir» hacía creer que quedaba algo por recibir, y no queda: la
+  // mercancía ya entró, el traslado cerró corto y esto solo deja constancia de
+  // qué pasó con el faltante. Recibir se hace UNA vez, y es el botón de arriba.
+  novedad: 'Novedad de traslado',
   rechazo: 'Rechazar',
   cancelacion: 'Cancelar',
 };
@@ -234,6 +245,10 @@ function construirColumnas(
     id: 'acciones',
     header: '',
     align: 'derecha',
+    // Ancho reservado para la columna. Sin esto la tabla se lo reparte entre
+    // todas y deja aquí lo que sobre, que con «Novedad de traslado» eran unos
+    // 60 px: el rótulo se partía en tres líneas y se salía del botón.
+    ancho: 'w-56',
     render: (traslado) => {
       const acciones = accionesDisponibles(traslado, quien);
 
@@ -242,13 +257,17 @@ function construirColumnas(
       }
 
       return (
-        <span className="flex justify-end gap-1.5">
+        <span className="flex flex-wrap justify-end gap-1.5">
           {acciones.map((accion) => (
             <button
               key={accion}
               type="button"
               onClick={() => onAccion(traslado, accion)}
-              className="inline-flex h-9 items-center rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 transition hover:border-terracota-400 hover:text-terracota-700"
+              // `whitespace-nowrap` es lo que impide que el rótulo se parta
+              // dentro de un botón de altura fija. Si alguna vez no cabe, lo que
+              // se rompe es la línea ENTRE botones -de ahí el flex-wrap de
+              // arriba- y no el texto de uno.
+              className="inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 transition hover:border-terracota-400 hover:text-terracota-700"
             >
               {ETIQUETA_ACCION[accion]}
             </button>
@@ -269,9 +288,10 @@ interface Pendiente {
 
 export function Traslados() {
   const { sedeActiva, nombreSedeActiva } = useSede();
-  const { sesion, sucursalId: sedePropia, esAdminGeneral } = useAuth();
+  const { sesion, sucursalId: sedePropia, esAdminGeneral, esSupervision } = useAuth();
   const [pestana, setPestana] = useState<Pestana>('todos');
   const [solicitando, setSolicitando] = useState(false);
+  const [transportadorasAbierto, setTransportadorasAbierto] = useState(false);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
 
   const {
@@ -350,6 +370,16 @@ export function Traslados() {
           {nombreSedeActiva} · lo que la sede envía y lo que recibe
         </p>
 
+        {/* El catálogo es de toda la red, pero lo mantienen administración y
+            gerencia: quien negocia el flete de su sede sabe con quién se
+            trabaja. La API responde 403 al operario. */}
+        {esSupervision ? (
+          <Boton variante="secundaria" onClick={() => setTransportadorasAbierto(true)}>
+            <Truck size={17} aria-hidden="true" />
+            Transportadoras
+          </Boton>
+        ) : null}
+
         {/* Pedir mercancía es del día a día: cualquier rol puede. Lo que exige
             supervisión es cerrar el documento (rechazo, cancelación). */}
         <Boton onClick={() => setSolicitando(true)}>
@@ -360,6 +390,16 @@ export function Traslados() {
 
       {solicitando ? (
         <FormularioSolicitud onCerrar={() => setSolicitando(false)} onSolicitada={recargar} />
+      ) : null}
+
+      {transportadorasAbierto ? (
+        <GestionTransportadoras
+          onCerrar={() => setTransportadorasAbierto(false)}
+          // Recarga la tabla: un traslado no cambia, pero el formulario de
+          // despacho vuelve a pedir el catálogo al abrirse y así ve el plazo
+          // nuevo sin recargar la página.
+          onGuardado={recargar}
+        />
       ) : null}
 
       {pendiente ? (

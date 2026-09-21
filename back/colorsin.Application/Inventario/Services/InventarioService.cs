@@ -474,120 +474,19 @@ public sealed class InventarioService : IInventarioService
     // el modulo evita que se anide una dentro de otra por descuido.
     // =========================================================================
 
-    public async Task<ResultadoLote> CrearLoteAsync(
-        CrearLoteDto peticion,
-        int usuarioId,
-        CancellationToken cancellationToken = default)
-    {
-        var numero = peticion.NumeroLote?.Trim();
-        if (string.IsNullOrEmpty(numero))
-        {
-            return ResultadoLote.Fallo(
-                ErrorLote.NumeroLoteVacio,
-                "El numero de lote es obligatorio: es lo que permite rastrear la mercancia " +
-                "hasta el fabricante.");
-        }
+    // AQUI ESTABAN CrearLoteAsync y CrearEnTransaccionAsync, que abrian un lote
+    // vacio a mano. Se quitaron junto con su endpoint.
+    //
+    // EL NUMERO DE LOTE Y SU VENCIMIENTO LOS PONE EL FABRICANTE: llegan impresos
+    // en el envase y no se conocen hasta que el camion descarga. Teclearlos por
+    // adelantado solo producia lotes inventados que no coincidian con ninguna
+    // caja, o lotes vacios esperando mercancia que quiza llegaba con otro numero.
+    //
+    // Los lotes nacen donde siempre nacieron de verdad: al recibir una compra
+    // -con el numero de la factura- y al recibir un traslado, que recrea en el
+    // destino el que salio del origen. Las dos pasan por RegistrarMovimientoAsync
+    // y por el servicio de traslados.
 
-        // Se comprueban producto y sede antes de tocar nada. La base tiene claves
-        // foraneas y rechazaria igual, pero un 404 con el id que fallo se lee; un
-        // error de restriccion de MySQL, no.
-        var producto = await _productos.ObtenerPorIdAsync(peticion.ProductoId, cancellationToken);
-        if (producto is null)
-        {
-            return ResultadoLote.Fallo(
-                ErrorLote.ProductoNoEncontrado,
-                $"No existe el producto {peticion.ProductoId}.");
-        }
-
-        var sucursal = await _sucursales.ObtenerPorIdAsync(peticion.SucursalId, cancellationToken);
-        if (sucursal is null)
-        {
-            return ResultadoLote.Fallo(
-                ErrorLote.SucursalNoEncontrada,
-                $"No existe la sede {peticion.SucursalId}.");
-        }
-
-        if (await _lotes.ExisteNumeroAsync(
-                peticion.ProductoId, peticion.SucursalId, numero,
-                excluyendoId: null, cancellationToken))
-        {
-            return ResultadoLote.Fallo(
-                ErrorLote.NumeroLoteDuplicado,
-                $"La sede '{sucursal.Nombre}' ya tiene un lote '{numero}' de " +
-                $"'{producto.Nombre}'. Si volvio a llegar el mismo lote, no se abre otro: " +
-                "se le suma cantidad con un ingreso o con una recepcion de compra.");
-        }
-
-        return await _inventario.EjecutarEnTransaccionAsync(
-            ct => CrearEnTransaccionAsync(peticion, numero, usuarioId, producto, sucursal.Nombre, ct),
-            cancellationToken);
-    }
-
-    private async Task<ResultadoLote> CrearEnTransaccionAsync(
-        CrearLoteDto peticion,
-        string numero,
-        int usuarioId,
-        Producto producto,
-        string nombreSucursal,
-        CancellationToken cancellationToken)
-    {
-        var lote = new Lote
-        {
-            ProductoId = peticion.ProductoId,
-            SucursalId = peticion.SucursalId,
-            NumeroLote = numero,
-            FechaVencimiento = peticion.FechaVencimiento,
-            // VACIO, no nulo. Los dos se comportan igual en las consultas -la
-            // condicion `> 0` descarta ambos- pero un cero dice "este lote no
-            // tiene existencias" y un nulo dice "no se sabe". Aqui si se sabe.
-            CantidadBase = 0m,
-            FechaIngreso = peticion.FechaIngreso
-            // Si FechaIngreso viene nula la pone la base con CURRENT_TIMESTAMP.
-        };
-
-        _lotes.Agregar(lote);
-
-        // Se guarda aqui para que MySQL asigne el id, que hace falta abajo.
-        // Sigue dentro de la transaccion.
-        await _lotes.GuardarCambiosAsync(cancellationToken);
-
-        await _auditoria.RegistrarEventoAsync(
-            Modulo,
-            "CrearLote",
-            usuarioId,
-            $"lote={lote.Id} ('{numero}') | " +
-            $"producto={peticion.ProductoId} ('{producto.Nombre}') | " +
-            $"sucursal={peticion.SucursalId} ('{nombreSucursal}') | " +
-            $"vencimiento={Fecha(peticion.FechaVencimiento)} | cantidadBase=0",
-            cancellationToken);
-
-        await _lotes.GuardarCambiosAsync(cancellationToken);
-
-        // Se rearma el DTO a mano en vez de releer el lote: las navegaciones no
-        // estan cargadas -la entidad se acaba de crear- y una consulta extra solo
-        // para los nombres que ya tenemos aqui no aporta nada.
-        var hoy = HoyLocal();
-        var dias = lote.FechaVencimiento is null
-            ? (int?)null
-            : lote.FechaVencimiento.Value.DayNumber - hoy.DayNumber;
-
-        return ResultadoLote.Ok(
-            new LoteDto(
-                lote.Id,
-                lote.ProductoId,
-                producto.Nombre,
-                lote.SucursalId,
-                nombreSucursal,
-                lote.NumeroLote,
-                lote.FechaVencimiento,
-                lote.CantidadBase,
-                producto.UnidadBase?.Simbolo,
-                lote.FechaIngreso,
-                dias,
-                dias < 0),
-            "Lote creado. Queda en cero: la mercancia entra con un movimiento de ingreso " +
-            "o con una recepcion de compra.");
-    }
 
     public async Task<ResultadoLote> ActualizarLoteAsync(
         int id,

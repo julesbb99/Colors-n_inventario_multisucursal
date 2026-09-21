@@ -3,6 +3,7 @@ import type {
   CierreTransferenciaDto,
   CrearTransferenciaDto,
   DespacharTransferenciaDto,
+  GuardarTransportadoraDto,
   RecibirTransferenciaDto,
   RegistrarNovedadDto,
   TransferenciaDto,
@@ -12,8 +13,71 @@ import type {
 /** La ruta es `/transferencias`. `/traslados` no existe: responde 404. */
 const RUTA = '/transferencias';
 
-export async function obtenerTransportadoras(): Promise<TransportadoraDto[]> {
-  const { data } = await axiosInstance.get<TransportadoraDto[]>(`${RUTA}/transportadoras`);
+/**
+ * Catálogo de transportadoras.
+ *
+ * Por omisión SIN las retiradas, que es lo que quiere el selector del despacho.
+ * La pantalla que las administra pide las dos para poder reactivarlas.
+ */
+export async function obtenerTransportadoras(
+  incluirRetiradas = false,
+): Promise<TransportadoraDto[]> {
+  const { data } = await axiosInstance.get<TransportadoraDto[]>(`${RUTA}/transportadoras`, {
+    params: incluirRetiradas ? { incluirRetiradas: true } : undefined,
+  });
+  return data;
+}
+
+/**
+ * Da de alta una transportadora.
+ *
+ * Administración general y gerencia de sede. La API responde 403 al operario y
+ * 409 si el nombre ya existe.
+ */
+export async function crearTransportadora(
+  peticion: GuardarTransportadoraDto,
+): Promise<TransportadoraDto> {
+  const { data } = await axiosInstance.post<TransportadoraDto>(
+    `${RUTA}/transportadoras`,
+    peticion,
+  );
+  return data;
+}
+
+/**
+ * Cambia los datos de una transportadora.
+ *
+ * NO toca los traslados ya despachados: cada uno guarda su guía y su fecha
+ * estimada propias. Cambiar los días afecta a los despachos que vengan.
+ */
+export async function actualizarTransportadora(
+  id: number,
+  peticion: GuardarTransportadoraDto,
+): Promise<TransportadoraDto> {
+  const { data } = await axiosInstance.put<TransportadoraDto>(
+    `${RUTA}/transportadoras/${id}`,
+    peticion,
+  );
+  return data;
+}
+
+/**
+ * Retira una transportadora del catálogo.
+ *
+ * NO LA BORRA, aunque el verbo HTTP sea DELETE: la fila se conserva y los
+ * traslados que llevó la siguen citando. Deja de ofrecerse al despachar, y un
+ * despacho que la pida igualmente recibe 409.
+ */
+export async function retirarTransportadora(id: number): Promise<TransportadoraDto> {
+  const { data } = await axiosInstance.delete<TransportadoraDto>(`${RUTA}/transportadoras/${id}`);
+  return data;
+}
+
+/** Devuelve al catálogo una retirada, conservando su historia. */
+export async function reactivarTransportadora(id: number): Promise<TransportadoraDto> {
+  const { data } = await axiosInstance.post<TransportadoraDto>(
+    `${RUTA}/transportadoras/${id}/reactivar`,
+  );
   return data;
 }
 

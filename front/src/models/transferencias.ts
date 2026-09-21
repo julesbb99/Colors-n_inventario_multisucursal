@@ -12,6 +12,7 @@ export type EstadoTransferencia =
   | 'EnTransito'
   | 'Completada'
   | 'RecibidaParcial'
+  | 'Cerrada'
   | 'Rechazada'
   | 'Cancelada';
 
@@ -21,6 +22,10 @@ export const ETIQUETA_ESTADO_TRANSFERENCIA: Record<EstadoTransferencia, string> 
   EnTransito: 'En tránsito',
   Completada: 'Completada',
   RecibidaParcial: 'Recibida parcial',
+  // «Cerrada con faltante» y no «Cerrada» a secas: en una tabla, junto a
+  // «Completada», hay que poder distinguir de un vistazo la que llegó entera de
+  // la que se dio por terminada sabiendo que faltó mercancía.
+  Cerrada: 'Cerrada con faltante',
   Rechazada: 'Rechazada',
   Cancelada: 'Cancelada',
 };
@@ -63,6 +68,28 @@ export interface TransportadoraDto {
    * Va por transportadora y no por tipo de servicio porque «urgente» es una
    * etiqueta comercial, no un plazo: dos urgentes pueden tardar 1 y 2 días.
    */
+  diasEntrega: number;
+  /**
+   * `false` si está retirada: no se ofrece al despachar, pero sigue citada en
+   * los traslados que llevó, con su guía y su fecha.
+   *
+   * Es baja lógica, no borrado: `transferencias.transportadora_id` la
+   * referencia, y ese dato es el que hace falta el día que se reclama un
+   * faltante.
+   */
+  activo: boolean;
+}
+
+/**
+ * Alta o edición de una transportadora.
+ *
+ * Sirve para las dos: el id va en la ruta, no en el cuerpo.
+ */
+export interface GuardarTransportadoraDto {
+  nombre: string;
+  /** 'urgente' o 'estandar'. La API no distingue mayúsculas al entrar. */
+  tipoServicio: 'urgente' | 'estandar';
+  /** Al menos 1. Es lo que calcula la fecha estimada de llegada. */
   diasEntrega: number;
 }
 

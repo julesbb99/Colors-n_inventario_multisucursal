@@ -124,6 +124,97 @@ export function CampoNumero({
   );
 }
 
+interface CampoDecimalProps {
+  etiqueta: string;
+  /**
+   * El valor tal como se ve: con COMA decimal. «12,5», no «12.5».
+   *
+   * Quien lo reciba debe pasarlo por {@link aNumero} antes de enviarlo: la API
+   * y `Number()` esperan punto.
+   */
+  valor: string;
+  onCambio: (valor: string) => void;
+  ayuda?: string;
+  requerido?: boolean;
+  disabled?: boolean;
+  placeholder?: string;
+}
+
+/**
+ * Cantidad decimal, POSITIVA y con COMA.
+ *
+ * POR QUE NO ES UN `<input type="number">`. Ese acepta cosas que aquí no tienen
+ * sentido y que además no se ven hasta que fallan: el signo menos, el más, y la
+ * notación científica -«1e5» es un número válido para el navegador-. Encima su
+ * separador decimal depende de la configuración del equipo, así que el mismo
+ * formulario admite «12.5» en una máquina y lo rechaza en otra.
+ *
+ * Aquí se filtra al teclear: solo dígitos y UNA coma. Lo que no cumple no llega
+ * a escribirse, en vez de escribirse y rechazarse al enviar.
+ *
+ * `inputMode="decimal"` hace que en un móvil salga el teclado numérico aunque el
+ * campo sea de texto.
+ */
+export function CampoDecimal({
+  etiqueta,
+  valor,
+  onCambio,
+  ayuda,
+  requerido,
+  disabled,
+  placeholder,
+}: CampoDecimalProps) {
+  return (
+    <Envoltorio etiqueta={etiqueta} ayuda={ayuda} requerido={requerido}>
+      {(id) => (
+        <input
+          id={id}
+          type="text"
+          inputMode="decimal"
+          value={valor}
+          disabled={disabled}
+          placeholder={placeholder}
+          onChange={(evento) => {
+            const escrito = evento.target.value;
+
+            // Vacío se permite: hay que poder borrar para corregir.
+            if (escrito === '') {
+              onCambio('');
+              return;
+            }
+
+            // Dígitos, opcionalmente una coma, opcionalmente más dígitos. Una
+            // coma suelta («,») vale mientras se escribe «,5»; lo que no vale
+            // es una segunda coma, un signo o una letra.
+            if (/^\d*,?\d*$/.test(escrito)) {
+              onCambio(escrito);
+            }
+            // Si no encaja, se ignora la tecla y el valor se queda como estaba.
+          }}
+          className={`${BASE_CONTROL} tabular-nums`}
+        />
+      )}
+    </Envoltorio>
+  );
+}
+
+/**
+ * Lo escrito en un {@link CampoDecimal}, como número.
+ *
+ * Devuelve `null` si está vacío o no es un número utilizable, que es lo que hay
+ * que comprobar antes de enviar. La coma se cambia por punto porque `Number()`
+ * no entiende la coma: `Number('12,5')` es `NaN`, no 12,5.
+ */
+export function aNumero(valor: string): number | null {
+  const limpio = valor.trim().replace(',', '.');
+  if (limpio === '' || limpio === '.') {
+    return null;
+  }
+
+  const numero = Number(limpio);
+  return Number.isFinite(numero) ? numero : null;
+}
+
 export interface OpcionSelect {
   valor: string;
   texto: string;

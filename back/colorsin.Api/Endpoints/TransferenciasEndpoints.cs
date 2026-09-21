@@ -43,11 +43,131 @@ public static class TransferenciasEndpoints
         // ---------------------------------------------------------------------
         grupo.MapGet("/transportadoras", async (
                 ITransferenciasService transferencias,
+                bool? incluirRetiradas,
                 CancellationToken cancellationToken) =>
-            TypedResults.Ok(await transferencias.ObtenerTransportadorasAsync(cancellationToken)))
+            TypedResults.Ok(await transferencias.ObtenerTransportadorasAsync(
+                incluirRetiradas ?? false, cancellationToken)))
             .WithName("TransferenciasTransportadoras")
             .WithSummary("Catalogo de transportadoras")
-            .WithDescription("De la red, no de una sede. Se elige al despachar.");
+            .WithDescription(
+                "De la red, no de una sede. Se elige al despachar, y sus `diasEntrega` son los " +
+                "que calculan la fecha estimada de llegada. " +
+                "Por omision NO trae las retiradas, que es lo que quiere el selector del " +
+                "despacho; `incluirRetiradas=true` las anade, para la pantalla que las administra.");
+
+        grupo.MapPost("/transportadoras", async (
+                GuardarTransportadoraDto peticion,
+                ITransferenciasService transferencias,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                var resultado = await transferencias.CrearTransportadoraAsync(
+                    peticion, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Created(
+                        $"/api/transferencias/transportadoras/{resultado.Transportadora!.Id}",
+                        resultado.Transportadora)
+                    : RespuestasHttp.Fallo(
+                        CodigoDe(resultado.Error), "Transportadora rechazada", resultado.Mensaje);
+            })
+            .WithName("TransferenciasCrearTransportadora")
+            .WithSummary("Da de alta una transportadora. Administracion y gerencia.")
+            .WithDescription(
+                "Nombre, tipo de servicio ('urgente' o 'estandar') y dias de entrega. " +
+                "Responde 409 si el nombre ya existe, ignorando mayusculas y espacios. " +
+                "SIN COMPROBACION DE SEDE, a diferencia del resto del modulo: el catalogo es de " +
+                "la red y no pertenece a ninguna bodega.")
+            .Produces<TransportadoraDto>(StatusCodes.Status201Created)
+            .Produces(StatusCodes.Status409Conflict)
+            // Administrador General y Gerente de Sucursal, no solo el primero.
+            //
+            // Es una diferencia deliberada con el catalogo de PROVEEDORES, que
+            // si esta reservado al Administrador General: alli cuelgan los
+            // precios de compra, y retocar uno mueve el criterio con el que
+            // compran las tres sedes. Una transportadora no lleva precios; es un
+            // contacto de logistica, y quien negocia el flete de su sede es
+            // quien sabe con quien se trabaja.
+            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+
+        grupo.MapPut("/transportadoras/{id:int}", async (
+                int id,
+                GuardarTransportadoraDto peticion,
+                ITransferenciasService transferencias,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                var resultado = await transferencias.ActualizarTransportadoraAsync(
+                    id, peticion, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Ok(resultado.Transportadora)
+                    : RespuestasHttp.Fallo(
+                        CodigoDe(resultado.Error), "Transportadora rechazada", resultado.Mensaje);
+            })
+            .WithName("TransferenciasActualizarTransportadora")
+            .WithSummary("Cambia los datos de una transportadora. Administracion y gerencia.")
+            .WithDescription(
+                "NO TOCA LOS TRASLADOS YA DESPACHADOS: cada uno guarda su guia y su fecha " +
+                "estimada propias, no una referencia a este plazo. Cambiar los dias afecta a los " +
+                "despachos que vengan, no a los que ya salieron.")
+            .Produces<TransportadoraDto>()
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status409Conflict)
+            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+
+        grupo.MapDelete("/transportadoras/{id:int}", async (
+                int id,
+                ITransferenciasService transferencias,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                var resultado = await transferencias.CambiarEstadoTransportadoraAsync(
+                    id, activa: false, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Ok(resultado.Transportadora)
+                    : RespuestasHttp.Fallo(
+                        CodigoDe(resultado.Error), "Retiro no aplicado", resultado.Mensaje);
+            })
+            .WithName("TransferenciasRetirarTransportadora")
+            .WithSummary("Retira una transportadora del catalogo. Administracion y gerencia.")
+            .WithDescription(
+                "ES UNA BAJA LOGICA, NO UN BORRADO, y el verbo DELETE aqui es la unica parte que " +
+                "suena a lo contrario: la fila se conserva con `activo=false`. Los traslados que " +
+                "llevo la siguen citando, con su guia y su fecha estimada, que es lo que hace " +
+                "falta el dia que se reclama un faltante. " +
+                "Deja de ofrecerse al despachar, y un despacho que la pida igualmente se rechaza. " +
+                "Se deshace con el endpoint de reactivar.")
+            .Produces<TransportadoraDto>()
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status409Conflict)
+            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+
+        grupo.MapPost("/transportadoras/{id:int}/reactivar", async (
+                int id,
+                ITransferenciasService transferencias,
+                IUsuarioContexto contexto,
+                CancellationToken cancellationToken) =>
+            {
+                var resultado = await transferencias.CambiarEstadoTransportadoraAsync(
+                    id, activa: true, contexto.UsuarioIdRequerido(), cancellationToken);
+
+                return resultado.Exito
+                    ? Results.Ok(resultado.Transportadora)
+                    : RespuestasHttp.Fallo(
+                        CodigoDe(resultado.Error), "Reactivacion no aplicada", resultado.Mensaje);
+            })
+            .WithName("TransferenciasReactivarTransportadora")
+            .WithSummary("Devuelve al catalogo una transportadora retirada.")
+            .WithDescription(
+                "Existe porque se vuelve a contratar a una empresa que se habia dejado de usar, y " +
+                "reactivarla conserva su historia en vez de obligar a crear un duplicado con el " +
+                "mismo nombre -que ademas chocaria con la comprobacion de nombre unico-.")
+            .Produces<TransportadoraDto>()
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status409Conflict)
+            .RequireAuthorization(PoliticasAutorizacion.Supervision);
 
         // ---------------------------------------------------------------------
         // Consultas
@@ -375,6 +495,19 @@ public static class TransferenciasEndpoints
             ? Results.Ok(resultado)
             : RespuestasHttp.Fallo(CodigoDe(resultado.Error), titulo, resultado.Mensaje);
 
+    private static int CodigoDe(ErrorTransportadora error) => error switch
+    {
+        ErrorTransportadora.NoEncontrada => StatusCodes.Status404NotFound,
+
+        // 409: la peticion esta bien formada y quien la manda tiene permiso; lo
+        // que no la admite es el estado actual de los datos.
+        ErrorTransportadora.NombreDuplicado
+            or ErrorTransportadora.EstadoSinCambio
+            => StatusCodes.Status409Conflict,
+
+        _ => StatusCodes.Status400BadRequest
+    };
+
     private static int CodigoDe(ErrorTransferencia error) => error switch
     {
         ErrorTransferencia.TransferenciaNoEncontrada
@@ -386,6 +519,7 @@ public static class TransferenciasEndpoints
 
         ErrorTransferencia.EstadoNoPermiteOperacion
             or ErrorTransferencia.StockInsuficiente
+            or ErrorTransferencia.TransportadoraRetirada
             => StatusCodes.Status409Conflict,
 
         _ => StatusCodes.Status400BadRequest

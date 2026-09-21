@@ -4,7 +4,7 @@ import { Modal } from '../ui/Modal';
 import { Boton } from '../ui/Boton';
 import { Alerta } from '../ui/Alerta';
 import { Spinner } from '../ui/Spinner';
-import { CampoArea, CampoNumero, CampoSelect, CampoTexto } from '../ui/Campos';
+import { aNumero, CampoArea, CampoDecimal, CampoNumero, CampoSelect, CampoTexto } from '../ui/Campos';
 import { useConsulta } from '../../hooks/useConsulta';
 import { useEnvio } from '../../hooks/useEnvio';
 import {
@@ -27,10 +27,25 @@ const SIN_TRANSPORTADORAS: TransportadoraDto[] = [];
 const TITULOS: Record<AccionTraslado, string> = {
   despacho: 'Despachar traslado',
   recepcion: 'Recibir traslado',
-  // El botón que abre esto dice «Recibir», así que el título tiene que decir lo
-  // mismo: un botón que promete una cosa y abre otra titulada distinto hace
-  // dudar de si se pulsó lo que se quería.
-  novedad: 'Recibir traslado',
+  // Lo mismo que dice el botón que lo abre: uno que promete una cosa y abre
+  // otra titulada distinto hace dudar de si se pulsó lo que se quería.
+  novedad: 'Novedad de traslado',
+  rechazo: 'Rechazar traslado',
+  cancelacion: 'Cancelar traslado',
+};
+
+/**
+ * El texto del botón que confirma, que NO siempre es el título.
+ *
+ * En casi todas las acciones el título ya es un verbo y sirve tal cual. La
+ * novedad no: se titula por lo que ES -«Novedad de traslado»- y el botón tiene
+ * que decir lo que HACE, que es guardarla. «Novedad de traslado» en un botón no
+ * dice si va a registrar algo o a abrir otra cosa.
+ */
+const ETIQUETA_ENVIO: Record<AccionTraslado, string> = {
+  despacho: 'Despachar traslado',
+  recepcion: 'Recibir traslado',
+  novedad: 'Guardar novedad',
   rechazo: 'Rechazar traslado',
   cancelacion: 'Cancelar traslado',
 };
@@ -234,7 +249,8 @@ export function AccionesTraslado({
           transferenciaId: traslado.id,
           // Número, no texto: la API espera el valor ordinal del enum.
           tipo: Number(tipoNovedad) as ValorTipoNovedad,
-          cantidadAfectada: cantidadAfectada === '' ? null : Number(cantidadAfectada),
+          // `aNumero` convierte la coma en punto: Number('0,5') es NaN.
+          cantidadAfectada: aNumero(cantidadAfectada),
           observaciones,
         });
       } else if (accion === 'rechazo') {
@@ -266,7 +282,7 @@ export function AccionesTraslado({
                 Enviando…
               </>
             ) : (
-              TITULOS[accion]
+              ETIQUETA_ENVIO[accion]
             )}
           </Boton>
         </>
@@ -402,12 +418,18 @@ export function AccionesTraslado({
               ]}
             />
 
-            <CampoNumero
+            {/*
+              Decimal con coma y sin signos: ver CampoDecimal. Un «-1» aquí no
+              significa nada, y con el campo numérico del navegador se podía
+              escribir -y hasta «1e5»-.
+            */}
+            <CampoDecimal
               etiqueta="Cantidad afectada"
               valor={cantidadAfectada}
               onCambio={setCantidadAfectada}
               disabled={enviando}
-              ayuda="Opcional."
+              placeholder="0,5"
+              ayuda="Opcional. Solo números, con coma decimal."
             />
           </>
         ) : null}

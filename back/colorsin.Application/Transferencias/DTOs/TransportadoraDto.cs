@@ -14,8 +14,13 @@ namespace Colorsin.Application.Transferencias.DTOs;
 /// Va por transportadora y no por tipo de servicio: 'urgente' es una etiqueta
 /// comercial, no un plazo.
 /// </param>
+/// <param name="Activo">
+/// <c>false</c> si esta retirada: no se ofrece al despachar, pero sigue citada
+/// en los traslados que llevo.
+/// </param>
 public sealed record TransportadoraDto(
     int Id,
     string Nombre,
     string TipoServicio,
-    byte DiasEntrega);
+    byte DiasEntrega,
+    bool Activo);

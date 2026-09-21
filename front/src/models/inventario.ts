@@ -173,14 +173,8 @@ export interface RegistrarMovimientoDto {
   observaciones?: string | null;
 }
 
-/** Alta de un lote. Sin cantidad: nace vacio. */
-export interface CrearLoteDto {
-  productoId: number;
-  sucursalId: number;
-  numeroLote: string;
-  fechaVencimiento?: string | null;
-  fechaIngreso?: string | null;
-}
+// Aqui estaba CrearLoteDto. Ya no hay alta de lotes: nacen al recibir una compra
+// o un traslado, con el numero que trae el envase.
 
 /** Correccion de un lote. Es un PUT: `fechaVencimiento` nula BORRA la fecha. */
 export interface ActualizarLoteDto {

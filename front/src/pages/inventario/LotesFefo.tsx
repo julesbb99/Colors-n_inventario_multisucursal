@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Plus } from 'lucide-react';
-import { useAuth } from '../../hooks/useAuth';
+import { Search } from 'lucide-react';
 import { useSede } from '../../hooks/useSede';
+import { useCatalogos } from '../../hooks/useCatalogos';
 import { useConsulta } from '../../hooks/useConsulta';
 import { obtenerLotes } from '../../services/inventario';
 import { estadoCaducidad } from '../../models/inventario';
@@ -12,8 +12,6 @@ import { StatusBadge } from '../../components/ui/StatusBadge';
 import type { EstadoBadge } from '../../components/ui/StatusBadge';
 import { ChipColor } from '../../components/ui/ChipColor';
 import { Alerta } from '../../components/ui/Alerta';
-import { Boton } from '../../components/ui/Boton';
-import { FormularioLote } from '../../components/inventario/FormularioLote';
 import { formatearDias, formatearFechaSolo, formatearVolumen } from '../../utils/formato';
 
 const ESTADO_BADGE: Record<EstadoCaducidad, EstadoBadge> = {
@@ -112,45 +110,74 @@ const COLUMNAS: ColumnaTabla<LoteDto>[] = [
 
 export function LotesFefo() {
   const { sedeActiva, nombreSedeActiva } = useSede();
-  const { esSupervision } = useAuth();
+  const { opcionesProducto } = useCatalogos();
   const [pestana, setPestana] = useState<Pestana>('todos');
   const [soloConSaldo, setSoloConSaldo] = useState(false);
-  const [abierto, setAbierto] = useState(false);
+  const [numeroBuscado, setNumeroBuscado] = useState('');
+  const [productoFiltro, setProductoFiltro] = useState('');
 
   const {
     datos: lotes,
     cargando,
     error,
     esPermisos,
-    recargar,
   } = useConsulta(
     () => obtenerLotes({ sucursalId: sedeActiva, soloConSaldo }),
     [sedeActiva, soloConSaldo],
     SIN_DATOS,
   );
 
+  /**
+   * Los dos buscadores, aplicados ANTES de repartir por pestañas.
+   *
+   * Ese orden es el que importa: así los contadores de las pestañas cuentan lo
+   * que queda tras buscar, y no el total. Buscar un lote y que «Vencidos» siga
+   * diciendo 4 cuando la tabla muestra uno haría dudar de cuál de los dos
+   * números es el bueno.
+   *
+   * VAN EN EL CLIENTE Y NO EN EL SERVIDOR porque la lista ya está acotada por
+   * sede: la API devuelve lo que el rol puede ver —un operario, solo su sede— y
+   * esto filtra dentro de eso. Ningún filtro de aquí amplía lo que se ve.
+   */
+  const visibles = useMemo(() => {
+    const texto = numeroBuscado.trim().toLowerCase();
+    const producto = Number(productoFiltro);
+
+    return lotes.filter((lote) => {
+      if (texto !== '' && !lote.numeroLote.toLowerCase().includes(texto)) {
+        return false;
+      }
+      if (productoFiltro !== '' && lote.productoId !== producto) {
+        return false;
+      }
+      return true;
+    });
+  }, [lotes, numeroBuscado, productoFiltro]);
+
   const conteos = useMemo(
     () => ({
-      todos: lotes.length,
-      porvencer: lotes.filter((l) => estadoCaducidad(l, DIAS_UMBRAL) === 'Por vencer').length,
-      vencidos: lotes.filter((l) => l.vencido).length,
-      sinfecha: lotes.filter((l) => l.fechaVencimiento === null).length,
+      todos: visibles.length,
+      porvencer: visibles.filter((l) => estadoCaducidad(l, DIAS_UMBRAL) === 'Por vencer').length,
+      vencidos: visibles.filter((l) => l.vencido).length,
+      sinfecha: visibles.filter((l) => l.fechaVencimiento === null).length,
     }),
-    [lotes],
+    [visibles],
   );
 
   const filtrados = useMemo(() => {
     if (pestana === 'porvencer') {
-      return lotes.filter((l) => estadoCaducidad(l, DIAS_UMBRAL) === 'Por vencer');
+      return visibles.filter((l) => estadoCaducidad(l, DIAS_UMBRAL) === 'Por vencer');
     }
     if (pestana === 'vencidos') {
-      return lotes.filter((l) => l.vencido);
+      return visibles.filter((l) => l.vencido);
     }
     if (pestana === 'sinfecha') {
-      return lotes.filter((l) => l.fechaVencimiento === null);
+      return visibles.filter((l) => l.fechaVencimiento === null);
     }
-    return lotes;
-  }, [lotes, pestana]);
+    return visibles;
+  }, [visibles, pestana]);
+
+  const buscando = numeroBuscado.trim() !== '' || productoFiltro !== '';
 
   return (
     <div className="flex flex-col gap-5">
@@ -183,14 +210,54 @@ export function LotesFefo() {
         })}
       </div>
 
-      <div className="flex flex-wrap items-center gap-4">
-        <p className="min-w-0 flex-1 text-sm text-slate-500">
-          {nombreSedeActiva} · orden FEFO: primero el que vence antes
-        </p>
+      <div className="flex flex-wrap items-end gap-3">
+        {/*
+          Buscar por número de lote: es la pregunta de «qué entró con esta
+          referencia», que se hace con el número impreso en el envase en la mano.
+          Por eso es texto libre y no un selector: el número se lee de la caja.
+        */}
+        <div className="flex h-11 w-full min-w-0 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 focus-within:border-petroleo-500 sm:w-64">
+          <Search size={17} className="shrink-0 text-slate-400" aria-hidden="true" />
+          <label htmlFor="buscar-lote" className="sr-only">
+            Buscar por número de lote
+          </label>
+          <input
+            id="buscar-lote"
+            type="search"
+            value={numeroBuscado}
+            onChange={(evento) => setNumeroBuscado(evento.target.value)}
+            placeholder="Número de lote"
+            className="min-w-0 flex-1 border-none bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+          />
+        </div>
 
-        {/* El filtro viaja al servidor, no se aplica aquí: un lote recién creado
-            está en cero y el endpoint lo devuelve salvo que se pida lo contrario. */}
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600">
+        {/*
+          El producto SÍ es un listado: son unos pocos y del catálogo de la red,
+          así que escribirlo a mano solo produciría búsquedas sin resultados por
+          una tilde o una palabra de más.
+        */}
+        <div className="w-full min-w-0 sm:w-64">
+          <label htmlFor="filtrar-producto" className="sr-only">
+            Filtrar por producto
+          </label>
+          <select
+            id="filtrar-producto"
+            value={productoFiltro}
+            onChange={(evento) => setProductoFiltro(evento.target.value)}
+            className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-petroleo-500"
+          >
+            <option value="">Todos los productos</option>
+            {opcionesProducto.map((opcion) => (
+              <option key={opcion.valor} value={opcion.valor}>
+                {opcion.texto}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* El filtro viaja al servidor, no se aplica aquí: un lote en cero
+            existe y el endpoint lo devuelve salvo que se pida lo contrario. */}
+        <label className="flex h-11 cursor-pointer items-center gap-2 text-sm text-slate-600">
           <input
             type="checkbox"
             checked={soloConSaldo}
@@ -200,19 +267,24 @@ export function LotesFefo() {
           Solo con existencias
         </label>
 
-        {/* Abrir un lote cambia la ficha con la que se rastrea la mercancía y su
-            caducidad: solo supervisión, igual que en la API. */}
-        {esSupervision ? (
-          <Boton onClick={() => setAbierto(true)}>
-            <Plus size={17} aria-hidden="true" />
-            Nuevo lote
-          </Boton>
+        {buscando ? (
+          <button
+            type="button"
+            onClick={() => {
+              setNumeroBuscado('');
+              setProductoFiltro('');
+            }}
+            className="h-11 rounded-lg px-2 text-sm font-semibold text-petroleo-700 underline-offset-2 transition hover:underline"
+          >
+            Quitar filtros
+          </button>
         ) : null}
       </div>
 
-      {abierto ? (
-        <FormularioLote onCerrar={() => setAbierto(false)} onCreado={recargar} />
-      ) : null}
+      <p className="text-sm text-slate-500">
+        {nombreSedeActiva} · orden FEFO: primero el que vence antes. Los lotes no se crean a mano:
+        nacen al recibir una compra o un traslado, con el número que trae el envase.
+      </p>
 
       {error ? (
         <Alerta tipo={esPermisos ? 'permisos' : 'error'}>{error}</Alerta>
@@ -222,7 +294,11 @@ export function LotesFefo() {
           data={filtrados}
           claveFila={(lote) => lote.id}
           cargando={cargando}
-          estadoVacio={VACIO_POR_PESTANA[pestana]}
+          estadoVacio={
+            buscando
+              ? 'Ningún lote coincide con la búsqueda en esta pestaña.'
+              : VACIO_POR_PESTANA[pestana]
+          }
         />
       )}
     </div>

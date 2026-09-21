@@ -6,8 +6,54 @@ namespace Colorsin.Application.Transferencias.Services;
 /// <summary>Operaciones del modulo de traslados entre sedes.</summary>
 public interface ITransferenciasService
 {
-    /// <summary>Transportadoras del catalogo, ordenadas por nombre.</summary>
+    /// <summary>
+    /// Transportadoras del catalogo, ordenadas por nombre. Las retiradas solo
+    /// salen si se piden: ver <c>ITransportadoraRepository.ObtenerTodasAsync</c>.
+    /// </summary>
     Task<IReadOnlyList<TransportadoraDto>> ObtenerTransportadorasAsync(
+        bool incluirRetiradas = false,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Da de alta una transportadora y devuelve la creada, ya con su id.
+    ///
+    /// Rechaza el nombre repetido -ignorando mayusculas y espacios-, el tipo de
+    /// servicio que no sea 'urgente' ni 'estandar', y un plazo menor que 1 dia.
+    /// </summary>
+    Task<ResultadoTransportadora> CrearTransportadoraAsync(
+        GuardarTransportadoraDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Cambia los datos de una transportadora. Mismas validaciones que el alta.
+    ///
+    /// NO TOCA LOS TRASLADOS YA DESPACHADOS: cada uno guarda su guia y su fecha
+    /// estimada propias, no una referencia a este plazo. Cambiar los dias afecta
+    /// a los despachos que vengan, no a los que ya salieron.
+    /// </summary>
+    Task<ResultadoTransportadora> ActualizarTransportadoraAsync(
+        int id,
+        GuardarTransportadoraDto peticion,
+        int usuarioId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Retira o reactiva una transportadora.
+    ///
+    /// NO LA BORRA: los traslados que llevo siguen citandola, con su guia y su
+    /// fecha estimada, que es lo que hace falta el dia que se reclama un
+    /// faltante. Retirada deja de ofrecerse al despachar.
+    ///
+    /// Es la misma operacion en los dos sentidos porque hace lo mismo -cambiar
+    /// una bandera- y separarla en dos metodos identicos es como uno gana una
+    /// comprobacion que el otro no tiene.
+    /// </summary>
+    /// <param name="activa"><c>false</c> retira, <c>true</c> reactiva.</param>
+    Task<ResultadoTransportadora> CambiarEstadoTransportadoraAsync(
+        int id,
+        bool activa,
+        int usuarioId,
         CancellationToken cancellationToken = default);
 
     /// <summary>Traslados, del mas reciente al mas antiguo. Sin movimientos ni novedades.</summary>

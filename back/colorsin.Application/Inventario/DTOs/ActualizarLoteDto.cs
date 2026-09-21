@@ -6,7 +6,7 @@ namespace Colorsin.Application.Inventario.DTOs;
 /// SOLO SE PUEDE CORREGIR LO QUE SE DIGITO: el numero impreso en el envase y la
 /// fecha de caducidad. Ni la cantidad, ni el producto, ni la sede.
 ///
-///   LA CANTIDAD no esta aqui por lo mismo que no esta en <see cref="CrearLoteDto"/>:
+///   LA CANTIDAD no esta aqui, y tampoco estaba al crear el lote:
 ///   cambiarla por este camino desajustaria el lote respecto del consolidado de
 ///   la sede y ademas no dejaria fila en el libro mayor. Para corregir un saldo
 ///   real -una merma, un conteo fisico que no cuadra- existe el movimiento de

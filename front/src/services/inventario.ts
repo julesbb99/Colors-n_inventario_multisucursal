@@ -4,7 +4,6 @@ import type {
   ActualizarExistenciaDto,
   ActualizarLoteDto,
   CrearExistenciaDto,
-  CrearLoteDto,
   ExistenciaDto,
   LoteDto,
   ProductoDto,
@@ -144,11 +143,11 @@ export async function registrarMovimiento(peticion: RegistrarMovimientoDto) {
   return data;
 }
 
-/** Abre un lote VACIO. La mercancia entra despues; ver CrearLoteDto. */
-export async function crearLote(peticion: CrearLoteDto) {
-  const { data } = await axiosInstance.post('/inventario/lotes', peticion);
-  return data;
-}
+// Aqui estaba crearLote(). Se quito con su endpoint: el numero de lote y su
+// vencimiento los pone el fabricante y llegan impresos en el envase, asi que no
+// se conocen hasta que el camion descarga. Los lotes nacen al recibir una compra
+// -con el numero de la factura- o un traslado, que recrea en el destino el que
+// salio del origen. Corregir un lote -actualizarLote, aqui abajo- si sigue.
 
 /** Corrige numero y caducidad. PUT: lo que no venga se borra, no se conserva. */
 export async function actualizarLote(id: number, peticion: ActualizarLoteDto) {

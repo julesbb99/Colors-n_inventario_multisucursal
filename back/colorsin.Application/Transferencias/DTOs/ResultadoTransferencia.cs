@@ -47,6 +47,15 @@ public enum ErrorTransferencia
     /// <summary>La transportadora no existe.</summary>
     TransportadoraNoEncontrada,
 
+    /// <summary>
+    /// La transportadora esta retirada del catalogo.
+    ///
+    /// Distinto de que no exista: existe y tiene historia, pero se dejo de
+    /// trabajar con ella. La pantalla ya no la ofrece; esto cierra la via de
+    /// quien llame al endpoint con un id viejo.
+    /// </summary>
+    TransportadoraRetirada,
+
     /// <summary>Falta el numero de guia.</summary>
     GuiaNoIndicada,
 
@@ -128,8 +137,19 @@ public sealed record ResultadoNovedad(
     public static ResultadoNovedad Fallo(ErrorTransferencia error, string mensaje) =>
         new(false, error, mensaje);
 
-    public static ResultadoNovedad Ok(int novedadId, TipoNovedad tipo) =>
+    /// <param name="cerroElTraslado">
+    /// Si ademas paso el traslado a <c>Cerrada</c>, que ocurre cuando venia de
+    /// <c>RecibidaParcial</c>: dar cuenta del faltante es su ultimo paso.
+    ///
+    /// El mensaje TIENE que decirlo. Antes decia siempre "no afecta el estado
+    /// del traslado", y desde que la novedad lo cierra eso era falso justo en el
+    /// caso mas frecuente.
+    /// </param>
+    public static ResultadoNovedad Ok(int novedadId, TipoNovedad tipo, bool cerroElTraslado) =>
         new(true, ErrorTransferencia.Ninguno,
-            $"Novedad de tipo {tipo} registrada. No afecta el saldo ni el estado del traslado.",
+            cerroElTraslado
+                ? $"Novedad de tipo {tipo} registrada. El traslado queda CERRADO: llego corto y " +
+                  "ya se dio cuenta del faltante. No se movio saldo."
+                : $"Novedad de tipo {tipo} registrada. No afecta el saldo ni el estado del traslado.",
             novedadId);
 }
