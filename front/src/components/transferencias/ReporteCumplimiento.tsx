@@ -86,6 +86,12 @@ const ENCABEZADOS = [
   { id: 'grupo', texto: '', align: 'text-left' },
   { id: 'solicitados', texto: 'Pedidos', align: 'text-right' },
   { id: 'despachados', texto: 'Despach.', align: 'text-right' },
+  // RECHAZADOS Y CANCELADOS: los dos desenlaces en que el traslado nunca sale.
+  // Se calculaban desde el principio y no se mostraban, y sin ellos la fila no
+  // cuadra a ojo: se veian 2 pedidos y 1 despachado sin poder saber qué pasó
+  // con el otro. Van JUNTO a «Despach.» por eso, para cerrar la resta.
+  { id: 'rechazados', texto: 'Rechaz.', align: 'text-right' },
+  { id: 'cancelados', texto: 'Cancel.', align: 'text-right' },
   { id: 'recibidos', texto: 'Recibidos', align: 'text-right' },
   { id: 'parciales', texto: 'Cortos', align: 'text-right' },
   { id: 'tarde', texto: 'Tarde', align: 'text-right' },
@@ -111,6 +117,20 @@ function Fila({ grupo, destacada = false }: { grupo: CumplimientoGrupoDto; desta
       </td>
       <td className="px-3 py-2.5 text-right">
         <Conteo valor={grupo.despachados} />
+      </td>
+      {/*
+        RECHAZADO ES DEL ORIGEN, CANCELADO ES DE QUIEN PIDIÓ, y son dos cosas
+        distintas por mucho que las dos acaben sin mercancía en movimiento: un
+        rechazo es la bodega diciendo «no lo atiendo» -y le baja el cumplimiento
+        de atención-, una cancelación es el destino retirando su propia petición,
+        que no le cuenta a nadie en contra. Por eso van en columnas separadas y
+        no sumadas en una de «no salió».
+      */}
+      <td className="px-3 py-2.5 text-right">
+        <Conteo valor={grupo.rechazados} alerta />
+      </td>
+      <td className="px-3 py-2.5 text-right">
+        <Conteo valor={grupo.cancelados} />
       </td>
       <td className="px-3 py-2.5 text-right">
         <Conteo valor={grupo.recibidos} />
@@ -326,9 +346,11 @@ export function ReporteCumplimiento({ onCerrar }: ReporteCumplimientoProps) {
 
             <p className="text-xs text-slate-500">
               Todo son conteos de traslados, nunca volúmenes: cada uno lleva su producto en su
-              unidad, y sumar litros con galones daría un número sin significado. «Pend.» son las
-              novedades que siguen esperando desenlace; «Días», el tránsito real promedio entre
-              despacho y recepción.
+              unidad, y sumar litros con galones daría un número sin significado.{' '}
+              <strong>Rechaz.</strong> los rechazó el origen —eso le baja la atención—;{' '}
+              <strong>Cancel.</strong> los retiró quien los pidió, y no le cuentan en contra a
+              nadie. «Pend.» son las novedades que siguen esperando desenlace; «Días», el tránsito
+              real promedio entre despacho y recepción.
             </p>
           </>
         ) : null}

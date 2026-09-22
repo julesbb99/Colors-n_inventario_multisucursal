@@ -574,6 +574,41 @@ public static class TransferenciasEndpoints
                 "ABIERTO A CUALQUIER ROL, acotado a su sede.")
             .Produces<ReporteCumplimientoDto>();
 
+        grupo.MapGet("/reportes/cumplimiento/detalle", async (
+                ITransferenciasService transferencias,
+                IUsuarioContexto contexto,
+                DateTime? desde,
+                DateTime? hasta,
+                int? sucursalId,
+                int? limite,
+                CancellationToken cancellationToken) =>
+            TypedResults.Ok(await transferencias.ObtenerDetalleCumplimientoAsync(
+                desde,
+                hasta,
+                // La MISMA regla de aislamiento que el agregado y que el resto
+                // del modulo: un gerente de Armenia no saca el detalle de Cali.
+                contexto.ResolverFiltroSucursal(sucursalId),
+                limite ?? 200,
+                cancellationToken)))
+            .WithName("TransferenciasCumplimientoDetalle")
+            .WithSummary("Cumplimiento traslado por traslado")
+            .WithDescription(
+                "EL AGREGADO CONTESTA 'COMO VAMOS'; ESTE CONTESTA 'CUAL FALLO'. Un 66 % de " +
+                "cumplimiento de plazo no dice que traslado llego tarde, con que transportadora " +
+                "ni con que guia. Cada fila trae su producto, sus LOTES en orden FEFO, las cuatro " +
+                "fechas del ciclo, los dias de transito reales, la desviacion en dias contra lo " +
+                "previsto -positiva es tarde- y sus novedades. " +
+                "`plazo` tiene SEIS valores y no dos: 'NoAplica' si se rechazo o se cancelo, " +
+                "'SinDespachar', 'EnTransito', 'ATiempo', 'Tarde', y 'SinPlazo' para los " +
+                "despachados antes de que la fecha estimada fuera obligatoria, que no se pueden " +
+                "juzgar. " +
+                "`llegoCompleto` se mide contra lo DESPACHADO, no contra lo pedido: lo que el " +
+                "origen no mando va en `ajustadoEnOrigen`, que tiene otro responsable. " +
+                "LLEVA TOPE, de 1 a 500, y `hayMas` dice si quedaron filas fuera; para ver mas " +
+                "alla se acota el periodo. " +
+                "ABIERTO A CUALQUIER ROL, acotado a su sede.")
+            .Produces<CumplimientoDetalleDto>();
+
         return rutas;
     }
 

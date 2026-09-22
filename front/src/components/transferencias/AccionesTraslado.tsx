@@ -423,6 +423,58 @@ export function AccionesTraslado({
               <> · Llegada prevista: {formatearFechaSolo(traslado.fechaEstimadaLlegada)}</>
             )}
           </span>
+
+          {/*
+            LOS LOTES QUE VIAJAN. Aquí valen más que en la tabla: quien abre
+            este panel tiene el camión delante, y lo que necesita es cotejar el
+            número impreso en el envase contra lo que dice el papel. Con la
+            cantidad por lote además se sabe cuánto debería traer cada uno.
+
+            Vacío mientras está Solicitada -no ha salido nada- así que no se
+            pinta el bloque.
+          */}
+          {traslado.lotes.length === 0 ? null : (
+            <span className="mt-2 block border-t border-slate-200 pt-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                {traslado.lotes.length === 1 ? 'Lote que viaja' : 'Lotes que viajan'}
+              </span>
+              <span className="mt-1 flex flex-wrap gap-1.5">
+                {traslado.lotes.map((l, i) => (
+                  <span
+                    key={l.loteId ?? `sin-lote-${i}`}
+                    className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded px-2 py-0.5 text-xs ${
+                      l.numeroLote === null
+                        ? 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200'
+                        : 'bg-white text-slate-700 ring-1 ring-inset ring-slate-200'
+                    }`}
+                  >
+                    <span className="font-mono font-semibold">
+                      {l.numeroLote ?? 'sin lote'}
+                    </span>
+                    {/* En unidad BASE del producto, no en la del traslado: así
+                        lo guarda el libro mayor. Un traslado de 5 galones mueve
+                        18,93 litros de lote. */}
+                    <span className="tabular-nums text-slate-500">
+                      {formatearVolumen(l.cantidadBase, traslado.unidadBaseSimbolo)}
+                    </span>
+                    {l.fechaVencimiento === null ? null : (
+                      <span className="text-slate-400">
+                        vence {formatearFechaSolo(l.fechaVencimiento)}
+                      </span>
+                    )}
+                  </span>
+                ))}
+              </span>
+              {/* El destino recrea los MISMOS números, y hay que decirlo: si no,
+                  quien recibe podría pensar que tiene que inventar lotes
+                  nuevos, y se perdería la trazabilidad del fabricante. */}
+              <span className="mt-1 block text-xs text-slate-500">
+                La sede destino los recrea con el mismo número y la misma
+                caducidad: la trazabilidad del fabricante no se corta en el
+                traslado.
+              </span>
+            </span>
+          )}
         </div>
 
         {accion === 'despacho' ? (

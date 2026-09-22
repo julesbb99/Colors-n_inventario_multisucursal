@@ -34,3 +34,40 @@ public sealed record DetalleTransferenciaDto(
     DateOnly? FechaVencimiento,
     decimal? CantidadBase,
     DateTime? Fecha);
+
+/// <summary>
+/// Un lote que viaja en el traslado, con lo que salio de el.
+///
+/// POR QUE EXISTE APARTE DE <see cref="DetalleTransferenciaDto"/>. Aquel es una
+/// fila del libro mayor: un traslado deja DOS por lote -el retiro del origen y
+/// el ingreso del destino- y viene con su id de movimiento, su sede y su fecha.
+/// Eso sirve para reconstruir el traslado, no para rotularlo.
+///
+/// Esto es lo que hace falta en una tabla: el numero que lleva impreso el
+/// envase, para que quien descargue el camion pueda cotejar. Se deriva de los
+/// movimientos de DESPACHO, que son los que dicen que salio de verdad; el
+/// destino recrea esos mismos numeros al recibir, asi que no hay dos listas.
+///
+/// VIAJA EN EL LISTADO, a diferencia de los movimientos, que vienen vacios
+/// alli: son pocos por traslado -lo normal es uno o dos lotes- y sin ellos la
+/// tabla solo puede decir "Pintura Epoxica", que no distingue una tanda de otra.
+/// </summary>
+/// <param name="LoteId">
+/// Lote del ORIGEN. Nulo cuando la cantidad salio sin lote asignado, que pasa
+/// si el saldo consolidado de la sede supera la suma de sus lotes.
+/// </param>
+/// <param name="NumeroLote">
+/// El numero del fabricante. Nulo en el mismo caso que <paramref name="LoteId"/>,
+/// y la pantalla lo muestra como "sin lote" en vez de esconder la fila: esa
+/// cantidad viaja igual.
+/// </param>
+/// <param name="FechaVencimiento">Caducidad del lote. Nula si el producto no caduca.</param>
+/// <param name="CantidadBase">
+/// Cuanto salio de ESE lote, en unidad base del producto. La suma de todos es
+/// la cantidad despachada.
+/// </param>
+public sealed record LoteTrasladadoDto(
+    int? LoteId,
+    string? NumeroLote,
+    DateOnly? FechaVencimiento,
+    decimal CantidadBase);

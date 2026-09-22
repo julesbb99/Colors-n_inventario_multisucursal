@@ -201,4 +201,32 @@ public interface ITransferenciasService
         DateTime? hasta = null,
         int? sucursalId = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// El mismo informe, pero TRASLADO POR TRASLADO.
+    ///
+    /// EL AGREGADO CONTESTA "COMO VAMOS"; ESTE CONTESTA "CUAL FALLO". Un 66 % de
+    /// cumplimiento de plazo no dice que traslado llego tarde, con que
+    /// transportadora ni con que guia, y esos tres datos son los que hacen falta
+    /// para reclamar. Aqui cada fila lleva su producto, sus lotes, sus cuatro
+    /// fechas, los dias de transito reales, la desviacion contra lo previsto y
+    /// sus novedades.
+    ///
+    /// LLEVA TOPE DE FILAS, a diferencia del agregado: aquel devuelve un punado
+    /// de grupos por muchos traslados que haya, y este una fila por traslado. Se
+    /// acota entre 1 y 500, y la respuesta dice si quedaron filas fuera.
+    /// </summary>
+    /// <param name="desde">Inicio del periodo, por fecha de solicitud. Nulo no acota.</param>
+    /// <param name="hasta">Fin del periodo. Nulo no acota.</param>
+    /// <param name="sucursalId">
+    /// Acota a los traslados en que esa sede participa por cualquiera de los dos
+    /// lados. Nulo -solo el Administrador General- da la red entera.
+    /// </param>
+    /// <param name="limite">Tope de filas, de 1 a 500.</param>
+    Task<CumplimientoDetalleDto> ObtenerDetalleCumplimientoAsync(
+        DateTime? desde = null,
+        DateTime? hasta = null,
+        int? sucursalId = null,
+        int limite = 200,
+        CancellationToken cancellationToken = default);
 }

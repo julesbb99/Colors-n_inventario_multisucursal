@@ -40,6 +40,10 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
         var consulta = _db.Transferencias
             .AsNoTracking()
             .Include(t => t.Producto)
+                // La unidad BASE del producto, que no es la del traslado: es la
+                // de las cantidades de los lotes. Sin esto el DTO la manda nula
+                // y la pantalla rotularia litros con el simbolo del traslado.
+                .ThenInclude(p => p.UnidadBase)
             .Include(t => t.SucursalOrigen)
             .Include(t => t.SucursalDestino)
             .Include(t => t.Transportadora)
@@ -84,6 +88,7 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
         _db.Transferencias
             .AsNoTracking()
             .Include(t => t.Producto)
+                .ThenInclude(p => p.UnidadBase)
             .Include(t => t.SucursalOrigen)
             .Include(t => t.SucursalDestino)
             .Include(t => t.Transportadora)
@@ -105,12 +110,63 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
         // informe recortado a las cien mas recientes daria porcentajes de una
         // muestra arbitraria y los presentaria como los del periodo. Lo que
         // acota aqui es el periodo, que quien consulta elige.
-        var consulta = _db.Transferencias
-            .AsNoTracking()
+        //
+        // El filtro -periodo y sede por cualquiera de sus dos lados- se comparte
+        // con el detalle y su conteo: ver FiltrarParaReporte.
+        return await FiltrarParaReporte(desde, hasta, sucursalId)
             .Include(t => t.SucursalOrigen)
             .Include(t => t.SucursalDestino)
             .Include(t => t.Novedades)
-            .AsQueryable();
+            .OrderBy(t => t.FechaSolicitud)
+            .ThenBy(t => t.Id)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Transferencia>> ObtenerDetalleParaReporteAsync(
+        DateTime? desde = null,
+        DateTime? hasta = null,
+        int? sucursalId = null,
+        int limite = 200,
+        CancellationToken cancellationToken = default) =>
+        await FiltrarParaReporte(desde, hasta, sucursalId)
+            .Include(t => t.Producto)
+                .ThenInclude(p => p.UnidadBase)
+            .Include(t => t.SucursalOrigen)
+            .Include(t => t.SucursalDestino)
+            .Include(t => t.Transportadora)
+            .Include(t => t.Unidad)
+            .Include(t => t.Novedades)
+            // Del mas reciente al mas antiguo: es el orden en que se buscan las
+            // cosas en un informe -lo de ayer antes que lo del mes pasado- y es
+            // el contrario del agregado, que va cronologico porque alimenta
+            // sumas y no una lista que alguien recorre con la vista.
+            .OrderByDescending(t => t.FechaSolicitud)
+            .ThenByDescending(t => t.Id)
+            .Take(Math.Clamp(limite, 1, 1000))
+            .ToListAsync(cancellationToken);
+
+    public Task<int> ContarParaReporteAsync(
+        DateTime? desde = null,
+        DateTime? hasta = null,
+        int? sucursalId = null,
+        CancellationToken cancellationToken = default) =>
+        // Sin Include ni Take: un COUNT no trae filas, asi que cargar las
+        // navegaciones aqui seria trabajo para descartarlo.
+        FiltrarParaReporte(desde, hasta, sucursalId).CountAsync(cancellationToken);
+
+    /// <summary>
+    /// El filtro que comparten las tres consultas del informe: periodo por
+    /// fecha de solicitud y sede por CUALQUIERA de sus dos lados.
+    ///
+    /// Va en un solo sitio a proposito: si el listado y su conteo filtraran
+    /// distinto, el aviso de "hay mas" saldria cuando no debe.
+    /// </summary>
+    private IQueryable<Transferencia> FiltrarParaReporte(
+        DateTime? desde,
+        DateTime? hasta,
+        int? sucursalId)
+    {
+        var consulta = _db.Transferencias.AsNoTracking().AsQueryable();
 
         if (desde is DateTime d)
         {
@@ -122,19 +178,14 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
             consulta = consulta.Where(t => t.FechaSolicitud <= h);
         }
 
-        // Una sede entra al informe por sus dos lados: lo que despacha y lo que
-        // recibe. Filtrar solo por origen dejaria fuera la mitad de su
-        // actividad, y las rutas hacia ella no saldrian.
+        // Una sede participa por sus dos lados: lo que despacha y lo que recibe.
         if (sucursalId is int s)
         {
             consulta = consulta.Where(
                 t => t.SucursalOrigenId == s || t.SucursalDestinoId == s);
         }
 
-        return await consulta
-            .OrderBy(t => t.FechaSolicitud)
-            .ThenBy(t => t.Id)
-            .ToListAsync(cancellationToken);
+        return consulta;
     }
 
     public Task<NovedadTransferencia?> ObtenerNovedadParaOperarAsync(
@@ -213,6 +264,67 @@ public sealed class TransferenciaRepository : ITransferenciaRepository
             .Where(m => m.TransferenciaId == transferenciaId)
             .OrderBy(m => m.Id)
             .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<LoteDeTransferencia>> ObtenerLotesDeTransferenciasAsync(
+        IReadOnlyCollection<int> transferenciaIds,
+        CancellationToken cancellationToken = default)
+    {
+        // Sin ids no hay nada que preguntar, y un IN () vacio es SQL invalido en
+        // algunos proveedores: se corta antes de ir a la base.
+        if (transferenciaIds.Count == 0)
+        {
+            return [];
+        }
+
+        // SOLO LOS RETIROS. Son los movimientos del despacho, que dicen que
+        // salio de verdad del origen. El destino recrea esos mismos numeros al
+        // recibir, asi que incluir los ingresos daria la misma lista con el
+        // doble de filas.
+        //
+        // Se agrupa por lote porque FEFO puede partir una cantidad en dos
+        // movimientos del MISMO lote -pasa si el reparto se recalcula- y la
+        // tabla tiene que mostrar un lote una vez, con su total.
+        var filas = await _db.MovimientosInventario
+            .AsNoTracking()
+            .Where(m => m.TransferenciaId != null
+                     && transferenciaIds.Contains(m.TransferenciaId.Value)
+                     && m.Tipo == TipoMovimiento.Retiro)
+            .GroupBy(m => new
+            {
+                TransferenciaId = m.TransferenciaId!.Value,
+                m.LoteId,
+                // El numero y el vencimiento entran en la clave y no como
+                // agregado: son constantes dentro de un lote, y sacarlos con un
+                // Max() obligaria a EF a una subconsulta correlacionada por
+                // cada grupo.
+                NumeroLote = m.Lote != null ? m.Lote.NumeroLote : null,
+                FechaVencimiento = m.Lote != null ? m.Lote.FechaVencimiento : null
+            })
+            .Select(g => new
+            {
+                g.Key.TransferenciaId,
+                g.Key.LoteId,
+                g.Key.NumeroLote,
+                g.Key.FechaVencimiento,
+                CantidadBase = g.Sum(m => m.CantidadBase)
+            })
+            .ToListAsync(cancellationToken);
+
+        return filas
+            // FEFO: el que vence antes primero, igual que salio del estante. Los
+            // que no caducan al final, para que no encabecen la lista por tener
+            // la fecha nula.
+            .OrderBy(f => f.FechaVencimiento is null)
+            .ThenBy(f => f.FechaVencimiento)
+            .ThenBy(f => f.LoteId)
+            .Select(f => new LoteDeTransferencia(
+                f.TransferenciaId,
+                f.LoteId,
+                f.NumeroLote,
+                f.FechaVencimiento,
+                f.CantidadBase ?? 0m))
+            .ToList();
+    }
 
     // =========================================================================
     // ESCRITURA

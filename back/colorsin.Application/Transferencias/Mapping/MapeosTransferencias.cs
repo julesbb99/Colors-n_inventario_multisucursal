@@ -1,4 +1,5 @@
 using Colorsin.Application.Transferencias.DTOs;
+using Colorsin.Application.Transferencias.Repositories;
 using Colorsin.Domain.Inventario;
 using Colorsin.Domain.Transferencias;
 
@@ -63,7 +64,8 @@ public static class MapeosTransferencias
     public static TransferenciaDto ToDto(
         this Transferencia transferencia,
         IReadOnlyList<DetalleTransferenciaDto>? movimientos = null,
-        IReadOnlyList<NovedadTransferenciaDto>? novedades = null)
+        IReadOnlyList<NovedadTransferenciaDto>? novedades = null,
+        IReadOnlyList<LoteTrasladadoDto>? lotes = null)
     {
         var lista = novedades ?? transferencia.Novedades
             // Mas reciente primero: lo ultimo que paso con el traslado es lo
@@ -91,6 +93,11 @@ public static class MapeosTransferencias
             transferencia.CantidadRecibida,
             transferencia.UnidadId,
             transferencia.Unidad?.Simbolo ?? string.Empty,
+            // La unidad BASE del producto, no la del traslado: es la de las
+            // cantidades de los lotes. Nula tambien si la consulta no incluyo
+            // la navegacion, que es el motivo de que ObtenerAsync y
+            // ObtenerPorIdAsync lleven el ThenInclude a UnidadBase.
+            transferencia.Producto?.UnidadBase?.Simbolo,
             transferencia.Estado?.ToString(),
             transferencia.Urgencia?.ToString(),
             transferencia.FechaSolicitud,
@@ -98,7 +105,21 @@ public static class MapeosTransferencias
             transferencia.FechaEstimadaLlegada,
             transferencia.FechaRecepcion,
             lista.Count(n => n.Estado == nameof(EstadoNovedad.Abierta)),
+            lotes ?? [],
             movimientos ?? [],
             lista);
     }
+
+    /// <summary>
+    /// Los lotes que salieron, tal como los pinta una tabla.
+    ///
+    /// Se mapea desde la fila agrupada del repositorio y no desde los
+    /// movimientos: alli un lote puede aparecer dos veces -FEFO puede partir la
+    /// cantidad- y la tabla tiene que mostrarlo una, con su total.
+    /// </summary>
+    public static LoteTrasladadoDto ToLoteDto(this LoteDeTransferencia lote) => new(
+        lote.LoteId,
+        lote.NumeroLote,
+        lote.FechaVencimiento,
+        lote.CantidadBase);
 }

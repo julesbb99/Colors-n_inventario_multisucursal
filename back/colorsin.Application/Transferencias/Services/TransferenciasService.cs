@@ -17,6 +17,17 @@ public sealed class TransferenciasService : ITransferenciasService
     /// <summary>Nombre del modulo en los eventos de auditoria.</summary>
     private const string Modulo = "Transferencias";
 
+    /// <summary>
+    /// Tope de filas del informe traslado por traslado.
+    ///
+    /// El informe AGREGADO no lo lleva -devuelve un punado de grupos por muchos
+    /// traslados que haya- pero este devuelve una fila por traslado y con sus
+    /// lotes, asi que una consulta de "todo el historico" crecerian sin freno.
+    /// Quinientas filas es mas de lo que nadie recorre con la vista; para mirar
+    /// mas alla, lo que se acota es el periodo.
+    /// </summary>
+    private const int TopeDetalleCumplimiento = 500;
+
     private readonly ITransferenciaRepository _transferencias;
     private readonly ITransportadoraRepository _transportadoras;
     private readonly IInventarioRepository _inventario;
@@ -270,7 +281,26 @@ public sealed class TransferenciasService : ITransferenciasService
         var transferencias = await _transferencias.ObtenerAsync(
             sucursalOrigenId, sucursalDestinoId, estado, limite, cancellationToken);
 
-        return transferencias.Select(t => t.ToDto()).ToList();
+        // DOS CONSULTAS PARA TODO EL LISTADO, no una por fila.
+        //
+        // Los lotes viven en el libro mayor, que no es una navegacion del
+        // traslado: pedirselos a cada uno serian cien consultas para pintar cien
+        // filas. Se piden todos juntos y se reparten aqui.
+        var lotes = await _transferencias.ObtenerLotesDeTransferenciasAsync(
+            transferencias.Select(t => t.Id).ToList(), cancellationToken);
+
+        var porTraslado = lotes
+            .GroupBy(l => l.TransferenciaId)
+            .ToDictionary(
+                g => g.Key,
+                // El orden FEFO que trae el repositorio se conserva: GroupBy de
+                // LINQ to Objects mantiene el orden de entrada dentro del grupo.
+                g => (IReadOnlyList<LoteTrasladadoDto>)g.Select(l => l.ToLoteDto()).ToList());
+
+        return transferencias
+            .Select(t => t.ToDto(
+                lotes: porTraslado.TryGetValue(t.Id, out var suyos) ? suyos : []))
+            .ToList();
     }
 
     public async Task<TransferenciaDto?> ObtenerTransferenciaPorIdAsync(
@@ -285,13 +315,22 @@ public sealed class TransferenciasService : ITransferenciasService
 
         var movimientos = await _transferencias.ObtenerMovimientosAsync(id, cancellationToken);
 
+        // Los lotes salen de la MISMA consulta que alimenta el listado, no de
+        // filtrar los movimientos de arriba. Es una consulta mas, cierto, pero
+        // garantiza que el detalle y la tabla muestren la misma lista agrupada
+        // igual; derivarla aqui a mano es como las dos empiezan a diferir.
+        var lotes = await _transferencias.ObtenerLotesDeTransferenciasAsync(
+            [id], cancellationToken);
+
         // Las novedades NO se pasan: se dejan leer de la navegacion, que es
         // donde `ToDto` las ordena de mas reciente a mas antigua. Pasarlas aqui
         // -como se hacia- las mandaba en el orden en que las devolvio la base,
         // asi que el detalle y el listado del mismo traslado las daban en
         // orden distinto. La pantalla elige "la mas reciente" de esa lista, y
         // con dos ordenes posibles eso es una fuente silenciosa de discrepancia.
-        return transferencia.ToDto(movimientos.Select(m => m.ToDetalleDto()).ToList());
+        return transferencia.ToDto(
+            movimientos.Select(m => m.ToDetalleDto()).ToList(),
+            lotes: lotes.Select(l => l.ToLoteDto()).ToList());
     }
 
     // =========================================================================
@@ -1331,6 +1370,140 @@ public sealed class TransferenciasService : ITransferenciasService
             Porcentaje(despachados, atendibles),
             Porcentaje(completos, recibidos),
             Porcentaje(aTiempo, conPlazo.Count));
+    }
+
+    public async Task<CumplimientoDetalleDto> ObtenerDetalleCumplimientoAsync(
+        DateTime? desde = null,
+        DateTime? hasta = null,
+        int? sucursalId = null,
+        int limite = 200,
+        CancellationToken cancellationToken = default)
+    {
+        var tope = Math.Clamp(limite, 1, TopeDetalleCumplimiento);
+
+        var traslados = await _transferencias.ObtenerDetalleParaReporteAsync(
+            desde, hasta, sucursalId, tope, cancellationToken);
+
+        var total = await _transferencias.ContarParaReporteAsync(
+            desde, hasta, sucursalId, cancellationToken);
+
+        // Los lotes de todos los traslados en UNA consulta, igual que en el
+        // listado: pedirselos fila por fila serian doscientas.
+        var lotes = await _transferencias.ObtenerLotesDeTransferenciasAsync(
+            traslados.Select(t => t.Id).ToList(), cancellationToken);
+
+        var porTraslado = lotes
+            .GroupBy(l => l.TransferenciaId)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<LoteTrasladadoDto>)g.Select(l => l.ToLoteDto()).ToList());
+
+        var filas = traslados
+            .Select(t => ArmarFilaCumplimiento(
+                t, porTraslado.TryGetValue(t.Id, out var suyos) ? suyos : []))
+            .ToList();
+
+        return new CumplimientoDetalleDto(
+            desde,
+            hasta,
+            sucursalId,
+            filas,
+            tope,
+            // El total real contra el tope, no el conteo de la lista: comparar
+            // `filas.Count == tope` falla justo cuando coinciden, y avisaria de
+            // filas que no existen.
+            total > filas.Count);
+    }
+
+    /// <summary>
+    /// Deriva la fila de informe de un traslado: las fechas en dias, el plazo y
+    /// si llego completo.
+    ///
+    /// SE DERIVA AQUI Y NO EN LA PANTALLA porque son reglas, no formato: "a
+    /// tiempo" es una definicion del negocio -por dia de calendario, no por
+    /// horas- y "completo" se mide contra lo despachado y no contra lo pedido.
+    /// Repartirlas en cada pantalla que muestre un traslado es como dos de ellas
+    /// acaban clasificando el mismo traslado distinto.
+    /// </summary>
+    private static CumplimientoTrasladoDto ArmarFilaCumplimiento(
+        Transferencia t,
+        IReadOnlyList<LoteTrasladadoDto> lotes)
+    {
+        var solicitada = t.CantidadSolicitada;
+        var despachada = t.CantidadDespachada;
+        var recibida = t.CantidadRecibida;
+
+        // Transito real. Con un decimal: medio dia importa cuando el plazo
+        // pactado es de uno.
+        decimal? diasTransito =
+            t.FechaDespacho is DateTime salida && t.FechaRecepcion is DateTime llegada
+                ? Math.Round((decimal)(llegada - salida).TotalDays, 1,
+                    MidpointRounding.AwayFromZero)
+                : null;
+
+        // POR DIA DE CALENDARIO, no por horas. La fecha estimada se guarda a
+        // medianoche, asi que restar instantes daria medio dia de retraso a todo
+        // lo que llega por la tarde del dia previsto.
+        int? desviacion =
+            t.FechaRecepcion is DateTime real && t.FechaEstimadaLlegada is DateTime prevista
+                ? real.Date.DayNumber - prevista.Date.DayNumber
+                : null;
+
+        var plazo =
+            t.Estado is EstadoTransferencia.Rechazada or EstadoTransferencia.Cancelada
+                ? EstadoPlazo.NoAplica
+                : t.FechaDespacho is null
+                    ? EstadoPlazo.SinDespachar
+                    : t.FechaRecepcion is null
+                        ? EstadoPlazo.EnTransito
+                        : desviacion is null
+                            ? EstadoPlazo.SinPlazo
+                            : desviacion <= 0
+                                ? EstadoPlazo.ATiempo
+                                : EstadoPlazo.Tarde;
+
+        // Contra lo DESPACHADO. Si el origen ajusto el envio a 3 de los 5
+        // pedidos y llegaron los 3, el traslado llego completo; lo que no mando
+        // es otra cosa, y va en AjustadoEnOrigen.
+        bool? completo = recibida is null
+            ? null
+            : recibida >= (despachada ?? solicitada ?? 0m);
+
+        return new CumplimientoTrasladoDto(
+            t.Id,
+            t.Estado?.ToString(),
+            t.Producto?.Nombre ?? string.Empty,
+            t.SucursalOrigenId,
+            t.SucursalOrigen?.Nombre ?? string.Empty,
+            t.SucursalDestinoId,
+            t.SucursalDestino?.Nombre ?? string.Empty,
+            t.Transportadora?.Nombre,
+            t.Guia,
+            t.Unidad?.Simbolo ?? string.Empty,
+            t.Producto?.UnidadBase?.Simbolo,
+            solicitada,
+            despachada,
+            recibida,
+            t.FechaSolicitud,
+            t.FechaDespacho,
+            t.FechaEstimadaLlegada,
+            t.FechaRecepcion,
+            diasTransito,
+            desviacion,
+            plazo.ToString(),
+            completo,
+            despachada is decimal d && solicitada is decimal s && d < s,
+            lotes,
+            t.Novedades
+                .OrderByDescending(n => n.Fecha)
+                .ThenByDescending(n => n.Id)
+                .Select(n => new NovedadResumenDto(
+                    n.Tipo?.ToString(),
+                    n.CantidadAfectada,
+                    n.Tratamiento.ToString(),
+                    n.Estado.ToString()))
+                .ToList(),
+            t.Novedades.Count(n => n.Estado == EstadoNovedad.Abierta));
     }
 
     /// <summary>

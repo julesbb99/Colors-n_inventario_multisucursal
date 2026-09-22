@@ -132,6 +132,27 @@ export interface GuardarTransportadoraDto {
   diasEntrega: number;
 }
 
+/**
+ * Un lote que viaja en el traslado, con lo que salió de él.
+ *
+ * SÍ VIAJA EN EL LISTADO, a diferencia de los movimientos: son pocos por
+ * traslado y son lo que permite cotejar el camión contra el papel. Sin ellos la
+ * tabla solo puede decir «Pintura Epóxica», que no distingue una tanda de otra
+ * ni dice qué vence.
+ *
+ * Sale de los movimientos de DESPACHO. El destino recrea esos mismos números al
+ * recibir, así que no hay dos listas: es la misma mercancía.
+ */
+export interface LoteTrasladadoDto {
+  /** Lote del origen. Nulo si la cantidad salió sin lote asignado. */
+  loteId: number | null;
+  /** El número del fabricante. Nulo en el mismo caso; se muestra «sin lote». */
+  numeroLote: string | null;
+  fechaVencimiento: string | null;
+  /** Cuánto salió de ESE lote, en unidad base. La suma es lo despachado. */
+  cantidadBase: number;
+}
+
 /** Un movimiento de inventario ligado al traslado: la salida del origen o la entrada al destino. */
 export interface DetalleTransferenciaDto {
   movimientoId: number;
@@ -195,6 +216,15 @@ export interface TransferenciaDto {
   cantidadRecibida: number | null;
   unidadId: number;
   unidadSimbolo: string;
+  /**
+   * Unidad BASE del producto, que puede NO ser la del traslado.
+   *
+   * ES LA DE LAS CANTIDADES DE `lotes`. Un traslado de 5 GALONES mueve 18,93
+   * LITROS de lote, así que rotular ese 18,93 con `unidadSimbolo` diría «18,93
+   * gal»: un error de un factor 3,785 justo en la cifra que alguien va a
+   * cotejar contra el envase.
+   */
+  unidadBaseSimbolo: string | null;
   estado: EstadoTransferencia | null;
   urgencia: string | null;
   fechaSolicitud: string | null;
@@ -203,6 +233,11 @@ export interface TransferenciaDto {
   fechaRecepcion: string | null;
   /** Novedades que siguen esperando desenlace. Viaja también en el listado. */
   novedadesAbiertas: number;
+  /**
+   * Los lotes que viajan. Vacía mientras está «Solicitada»: hasta el despacho
+   * no ha salido nada, así que no hay lote que nombrar.
+   */
+  lotes: LoteTrasladadoDto[];
   movimientos: DetalleTransferenciaDto[];
   novedades: NovedadTransferenciaDto[];
 }

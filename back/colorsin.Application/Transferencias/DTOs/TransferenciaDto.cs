@@ -66,6 +66,18 @@ public sealed record NovedadTransferenciaDto(
 /// </param>
 /// <param name="UnidadId">Unidad del traslado, que puede no ser la unidad base del producto.</param>
 /// <param name="UnidadSimbolo">Abreviatura de esa unidad.</param>
+/// <param name="UnidadBaseSimbolo">
+/// Abreviatura de la unidad BASE del producto, que puede no ser la del traslado.
+///
+/// HACE FALTA PARA ROTULAR LOS LOTES. Las cantidades de
+/// <paramref name="Lotes"/> van en unidad base -asi las guarda el libro mayor-
+/// mientras que <paramref name="CantidadSolicitada"/> y las otras dos van en la
+/// unidad del traslado. Un traslado de 5 GALONES mueve 18,93 LITROS de lote, y
+/// rotular ese 18,93 con el simbolo del traslado diria "18,93 gal": un error de
+/// un factor 3,785 en la cifra que alguien va a cotejar contra el envase.
+///
+/// Nula si el producto no tiene unidad base definida.
+/// </param>
 /// <param name="Estado">'Solicitada', 'EnTransito', 'Completada', 'RecibidaParcial', 'Rechazada' o 'Cancelada'.</param>
 /// <param name="Urgencia">'Baja', 'Media' o 'Alta'.</param>
 /// <param name="FechaSolicitud">Cuando se pidio.</param>
@@ -81,6 +93,17 @@ public sealed record NovedadTransferenciaDto(
 /// VIAJA EN EL LISTADO aunque <paramref name="Novedades"/> venga vacia: la
 /// pantalla necesita saber si el traslado tiene algo pendiente sin cargar el
 /// detalle de las cien filas.
+/// </param>
+/// <param name="Lotes">
+/// Los lotes que viajan, con lo que salio de cada uno.
+///
+/// SI VIAJA EN EL LISTADO, a diferencia de <paramref name="Movimientos"/>: son
+/// pocos por traslado y son lo que permite cotejar el camion contra el papel.
+/// Sin ellos la tabla solo puede decir "Pintura Epoxica", que no distingue una
+/// tanda de otra ni dice que vence.
+///
+/// Vacia mientras el traslado esta 'Solicitada': hasta el despacho no ha salido
+/// nada, asi que no hay lote que nombrar.
 /// </param>
 /// <param name="Movimientos">
 /// Lo que el traslado movio en el stock, lote por lote. Viene vacia en los
@@ -105,6 +128,7 @@ public sealed record TransferenciaDto(
     decimal? CantidadRecibida,
     int UnidadId,
     string UnidadSimbolo,
+    string? UnidadBaseSimbolo,
     string? Estado,
     string? Urgencia,
     DateTime? FechaSolicitud,
@@ -112,5 +136,6 @@ public sealed record TransferenciaDto(
     DateTime? FechaEstimadaLlegada,
     DateTime? FechaRecepcion,
     int NovedadesAbiertas,
+    IReadOnlyList<LoteTrasladadoDto> Lotes,
     IReadOnlyList<DetalleTransferenciaDto> Movimientos,
     IReadOnlyList<NovedadTransferenciaDto> Novedades);

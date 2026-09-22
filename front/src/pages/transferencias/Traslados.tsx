@@ -257,11 +257,60 @@ function construirColumnas(
     },
     {
       id: 'producto',
-      header: 'Producto',
+      header: 'Producto y lotes',
       render: (t) => (
-        <span className="flex items-center gap-2.5">
+        <span className="flex items-start gap-2.5">
           <ChipColor nombre={t.productoNombre} alto={26} />
-          <span className="text-slate-700">{t.productoNombre}</span>
+          <span className="min-w-0">
+            <span className="block text-slate-700">{t.productoNombre}</span>
+
+            {/*
+              LOS NÚMEROS DE LOTE, debajo del producto.
+
+              El nombre del producto no distingue una tanda de otra: «Pintura
+              Epóxica» son todas, y lo que hay que cotejar contra el envase que
+              baja del camión es el número impreso. Con él además se sabe qué
+              vence, que es lo que ordena la cola FEFO.
+
+              Vacío mientras el traslado está Solicitada: hasta el despacho no
+              ha salido nada, así que no hay lote que nombrar todavía. Se
+              muestra un guion y no un hueco, para que no se lea como un dato
+              que falta.
+            */}
+            {t.lotes.length === 0 ? (
+              <span className="block text-xs text-slate-400">
+                {t.estado === 'Solicitada' ? 'sin despachar' : '—'}
+              </span>
+            ) : (
+              <span className="mt-0.5 flex flex-wrap gap-1">
+                {t.lotes.map((l, i) => (
+                  <span
+                    key={l.loteId ?? `sin-lote-${i}`}
+                    // OJO CON LA UNIDAD: la cantidad del lote va en la unidad
+                    // BASE del producto, no en la del traslado. Un traslado de
+                    // 5 galones mueve 18,93 litros de lote; rotularlo con
+                    // `unidadSimbolo` diría «18,93 gal».
+                    title={
+                      `${formatearVolumen(l.cantidadBase, t.unidadBaseSimbolo)} de este lote` +
+                      (l.fechaVencimiento === null
+                        ? ' · sin caducidad'
+                        : ` · vence el ${formatearFechaSolo(l.fechaVencimiento)}`)
+                    }
+                    className={`inline-flex items-center whitespace-nowrap rounded px-1.5 py-0.5 font-mono text-[11px] ${
+                      // Sin lote asignado no es lo mismo que un lote: esa
+                      // cantidad viaja sin trazabilidad del fabricante, y
+                      // conviene que se note en vez de disimularlo.
+                      l.numeroLote === null
+                        ? 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {l.numeroLote ?? 'sin lote'}
+                  </span>
+                ))}
+              </span>
+            )}
+          </span>
         </span>
       ),
     },
