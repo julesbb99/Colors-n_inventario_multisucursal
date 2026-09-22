@@ -1444,9 +1444,13 @@ public sealed class TransferenciasService : ITransferenciasService
         // POR DIA DE CALENDARIO, no por horas. La fecha estimada se guarda a
         // medianoche, asi que restar instantes daria medio dia de retraso a todo
         // lo que llega por la tarde del dia previsto.
+        // `DayNumber` es de DateOnly, no de DateTime: se convierte antes. Es
+        // ademas lo que se quiere decir -un dia del calendario, sin hora- asi
+        // que el tipo lo deja escrito.
         int? desviacion =
             t.FechaRecepcion is DateTime real && t.FechaEstimadaLlegada is DateTime prevista
-                ? real.Date.DayNumber - prevista.Date.DayNumber
+                ? DateOnly.FromDateTime(real).DayNumber
+                  - DateOnly.FromDateTime(prevista).DayNumber
                 : null;
 
         var plazo =

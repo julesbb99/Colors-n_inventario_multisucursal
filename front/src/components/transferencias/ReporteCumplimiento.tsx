@@ -10,6 +10,7 @@ import { Modal } from '../ui/Modal';
 import { Boton } from '../ui/Boton';
 import { Alerta } from '../ui/Alerta';
 import { CargandoPanel } from '../ui/Spinner';
+import { DetalleCumplimiento } from './DetalleCumplimiento';
 import { formatearEntero } from '../../utils/formato';
 
 const SIN_REPORTE: ReporteCumplimientoDto | null = null;
@@ -226,6 +227,14 @@ export function ReporteCumplimiento({ onCerrar }: ReporteCumplimientoProps) {
   const { sedeActiva, nombreSedeActiva } = useSede();
   const [desde, setDesde] = useState(haceMeses(3));
   const [hasta, setHasta] = useState(hoyLocal());
+  /**
+   * Qué pestaña se mira.
+   *
+   * El resumen es el que se abre: contesta «cómo vamos», que es la pregunta
+   * frecuente. El detalle contesta «cuál falló» y solo se pide cuando alguien
+   * lo abre —es una fila por traslado, con sus lotes y sus novedades—.
+   */
+  const [vista, setVista] = useState<'resumen' | 'detalle'>('resumen');
 
   const {
     datos: reporte,
@@ -294,11 +303,46 @@ export function ReporteCumplimiento({ onCerrar }: ReporteCumplimientoProps) {
           </Boton>
         </div>
 
-        {cargando ? <CargandoPanel texto="Calculando…" /> : null}
+        {/* Las dos vistas del mismo periodo: las fechas de arriba mandan en las
+            dos, así que cambiar de pestaña no pierde el filtro. */}
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-200">
+          {(
+            [
+              { id: 'resumen', etiqueta: 'Resumen por sede y ruta' },
+              { id: 'detalle', etiqueta: 'Traslado por traslado' },
+            ] as const
+          ).map(({ id, etiqueta }) => {
+            const activa = id === vista;
 
-        {error ? <Alerta tipo={esPermisos ? 'permisos' : 'error'}>{error}</Alerta> : null}
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setVista(id)}
+                aria-current={activa ? 'page' : undefined}
+                className={`-mb-px flex h-10 items-center border-b-2 px-1 text-sm transition ${
+                  activa
+                    ? 'border-terracota-500 font-bold text-slate-900'
+                    : 'border-transparent font-medium text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                {etiqueta}
+              </button>
+            );
+          })}
+        </div>
 
-        {reporte !== null && !cargando ? (
+        {vista === 'detalle' ? (
+          <DetalleCumplimiento sedeActiva={sedeActiva} desde={desde} hasta={hasta} />
+        ) : null}
+
+        {vista === 'resumen' && cargando ? <CargandoPanel texto="Calculando…" /> : null}
+
+        {vista === 'resumen' && error ? (
+          <Alerta tipo={esPermisos ? 'permisos' : 'error'}>{error}</Alerta>
+        ) : null}
+
+        {vista === 'resumen' && reporte !== null && !cargando ? (
           <>
             <Tabla
               titulo="Por sucursal que despacha"

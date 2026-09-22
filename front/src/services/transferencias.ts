@@ -4,6 +4,7 @@ import type {
   CerrarNovedadDto,
   CierreTransferenciaDto,
   CrearTransferenciaDto,
+  CumplimientoDetalleDto,
   DespacharTransferenciaDto,
   GuardarTransportadoraDto,
   RecibirTransferenciaDto,
@@ -230,6 +231,37 @@ export async function obtenerReporteCumplimiento(
         ...paramsDeSede(sucursalId),
         ...(desde ? { desde } : {}),
         ...(hasta ? { hasta } : {}),
+      },
+    },
+  );
+  return data;
+}
+
+/**
+ * El mismo informe, pero TRASLADO POR TRASLADO.
+ *
+ * El agregado contesta «cómo vamos»; este contesta «cuál falló»: cada fila trae
+ * su producto, sus lotes, las cuatro fechas del ciclo, los días de tránsito
+ * reales, la desviación contra lo previsto y sus novedades.
+ *
+ * LLEVA TOPE, que la API acota entre 1 y 500, y la respuesta dice en `hayMas`
+ * si quedaron filas fuera. Para ver más allá se acota el periodo, no se sube el
+ * tope: quinientas filas ya son más de lo que nadie recorre con la vista.
+ */
+export async function obtenerDetalleCumplimiento(
+  sucursalId: number | null,
+  desde?: string | null,
+  hasta?: string | null,
+  limite = 200,
+): Promise<CumplimientoDetalleDto> {
+  const { data } = await axiosInstance.get<CumplimientoDetalleDto>(
+    `${RUTA}/reportes/cumplimiento/detalle`,
+    {
+      params: {
+        ...paramsDeSede(sucursalId),
+        ...(desde ? { desde } : {}),
+        ...(hasta ? { hasta } : {}),
+        limite,
       },
     },
   );

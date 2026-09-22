@@ -351,3 +351,89 @@ export interface ReporteCumplimientoDto {
   porSucursal: CumplimientoGrupoDto[];
   porRuta: CumplimientoGrupoDto[];
 }
+
+/**
+ * Cómo le fue a un traslado frente a su plazo.
+ *
+ * SON SEIS CASOS Y NO DOS: un traslado que aún no ha salido no es un
+ * incumplimiento, y uno sin fecha estimada no se puede juzgar.
+ */
+export type EstadoPlazo =
+  | 'SinDespachar'
+  | 'EnTransito'
+  | 'ATiempo'
+  | 'Tarde'
+  | 'SinPlazo'
+  | 'NoAplica';
+
+export const ETIQUETA_PLAZO: Record<EstadoPlazo, string> = {
+  SinDespachar: 'Sin despachar',
+  EnTransito: 'En camino',
+  ATiempo: 'A tiempo',
+  Tarde: 'Tarde',
+  SinPlazo: 'Sin plazo',
+  NoAplica: 'No aplica',
+};
+
+/** Una novedad, con lo justo para una celda. */
+export interface NovedadResumenDto {
+  tipo: TipoNovedad | null;
+  cantidadAfectada: number | null;
+  tratamiento: TratamientoNovedad;
+  estado: EstadoNovedad;
+}
+
+/**
+ * Un traslado en el informe de cumplimiento.
+ *
+ * EL AGREGADO CONTESTA «CÓMO VAMOS»; ESTE CONTESTA «CUÁL FALLÓ». Un 66 % de
+ * cumplimiento de plazo no dice qué traslado llegó tarde, con qué
+ * transportadora ni con qué guía, y esos tres datos son los que hacen falta
+ * para reclamar.
+ */
+export interface CumplimientoTrasladoDto {
+  id: number;
+  estado: EstadoTransferencia | null;
+  productoNombre: string;
+  sucursalOrigenId: number;
+  sucursalOrigenNombre: string;
+  sucursalDestinoId: number;
+  sucursalDestinoNombre: string;
+  transportadoraNombre: string | null;
+  /** Con lo que se reclama. En un informe de cumplimiento no es un adorno. */
+  guia: string | null;
+  /** Unidad del traslado: la de las tres cantidades. */
+  unidadSimbolo: string;
+  /** Unidad base del producto: la de las cantidades de `lotes`. */
+  unidadBaseSimbolo: string | null;
+  cantidadSolicitada: number | null;
+  cantidadDespachada: number | null;
+  cantidadRecibida: number | null;
+  fechaSolicitud: string | null;
+  fechaDespacho: string | null;
+  fechaEstimadaLlegada: string | null;
+  fechaRecepcion: string | null;
+  /** Días reales entre despacho y recepción. Nulo si falta una de las dos fechas. */
+  diasTransito: number | null;
+  /** Días de diferencia contra lo previsto: POSITIVO es tarde. Nulo sin comparación. */
+  diasDesviacion: number | null;
+  plazo: EstadoPlazo;
+  /** Si llegó todo lo DESPACHADO. Nulo mientras no se reciba. */
+  llegoCompleto: boolean | null;
+  /** Si el origen mandó menos de lo pedido. No es una pérdida: nunca salió. */
+  ajustadoEnOrigen: boolean;
+  lotes: LoteTrasladadoDto[];
+  novedades: NovedadResumenDto[];
+  novedadesAbiertas: number;
+}
+
+export interface CumplimientoDetalleDto {
+  desde: string | null;
+  hasta: string | null;
+  sucursalId: number | null;
+  /** Del más reciente al más antiguo: es el orden en que se buscan las cosas. */
+  traslados: CumplimientoTrasladoDto[];
+  limite: number;
+  /** Si el tope dejó traslados fuera. Para ver más allá se acota el periodo. */
+  hayMas: boolean;
+}
