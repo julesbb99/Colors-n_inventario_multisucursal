@@ -4,56 +4,31 @@ import { CatalogosProvider } from '../../context/CatalogosContext';
 import { Navbar } from './Navbar';
 import { Sidebar } from './Sidebar';
 
-interface Encabezado {
-  titulo: string;
-  subtitulo: string;
-}
-
 /**
- * El encabezado de cada ruta.
+ * El nombre de cada ruta. NO SE PINTA: es solo para lectores de pantalla.
  *
- * Vive aqui y no dentro de cada pantalla para que el titulo sea parte del marco:
- * si cada pagina pintara el suyo, dos de ellas terminarian con espaciados
- * distintos y el contenido bailaria al navegar.
+ * Aqui habia un encabezado visible, con titulo y una segunda linea que explicaba
+ * de que iba el modulo. Se fue: la barra lateral ya dice donde esta uno, y la
+ * explicacion era una frase que se lee una vez y despues estorba todos los dias.
+ *
+ * El `<h1>` se queda oculto, no borrado. Sin ninguno, quien navega con lector de
+ * pantalla aterriza en la pagina y no oye en que modulo esta -el titulo del
+ * documento es el mismo en todas las rutas-, y saltar por encabezados, que es
+ * como se recorre una pagina asi, deja de funcionar.
  */
-const ENCABEZADOS: Record<string, Encabezado> = {
-  '/': {
-    titulo: 'Panel general',
-    subtitulo: 'Ventas, inventario y alertas de la sede seleccionada',
-  },
-  '/inventario/existencias': {
-    titulo: 'Existencias',
-    // Ya no dice "en unidad base": la tabla permite mirar el mismo saldo en
-    // litros, galones o canecas, y el subtitulo contradecia lo que se veia.
-    subtitulo: 'Saldo por sede y producto, en la unidad que elijas',
-  },
-  '/inventario/lotes': {
-    titulo: 'Lotes FEFO',
-    subtitulo: 'Trazabilidad y caducidad: primero sale el que vence antes',
-  },
-  '/traslados': {
-    titulo: 'Traslados entre sedes',
-    subtitulo: 'Lo pide el destino, lo despacha el origen',
-  },
-  '/compras': {
-    titulo: 'Compras',
-    subtitulo: 'Órdenes a proveedor y recepción de mercancía',
-  },
-  '/ventas': {
-    titulo: 'Ventas',
-    subtitulo: 'Salidas de mostrador, descontadas por FEFO',
-  },
-  '/usuarios': {
-    titulo: 'Usuarios',
-    subtitulo: 'Quién da de alta a quién: el administrador a gerentes y operadores, el gerente a operadores de su sede',
-  },
+const TITULOS: Record<string, string> = {
+  '/': 'Panel general',
+  '/inventario/existencias': 'Existencias',
+  '/inventario/lotes': 'Lotes FEFO',
+  '/traslados': 'Traslados entre sedes',
+  '/compras': 'Compras',
+  '/ventas': 'Ventas',
+  '/usuarios': 'Usuarios',
 };
-
-const POR_DEFECTO: Encabezado = { titulo: 'Colorsín', subtitulo: '' };
 
 export function MainLayout() {
   const { pathname } = useLocation();
-  const encabezado = ENCABEZADOS[pathname] ?? POR_DEFECTO;
+  const titulo = TITULOS[pathname] ?? 'Colorsín';
 
   return (
     // El proveedor de sede va AQUI y no en la raiz: carga el catalogo de
@@ -97,14 +72,7 @@ export function MainLayout() {
                 afectados: usan `fixed`, al que un ancestro `relative` no le
                 cambia nada. */}
             <main className="relative min-w-0 flex-1 overflow-y-auto bg-slate-50 px-6 py-5">
-              <div className="mb-5">
-                <h1 className="text-xl font-bold tracking-tight text-slate-900">
-                  {encabezado.titulo}
-                </h1>
-                {encabezado.subtitulo ? (
-                  <p className="mt-0.5 text-sm text-slate-500">{encabezado.subtitulo}</p>
-                ) : null}
-              </div>
+              <h1 className="sr-only">{titulo}</h1>
 
               <Outlet />
             </main>

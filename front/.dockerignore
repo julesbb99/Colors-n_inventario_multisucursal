@@ -1,0 +1,29 @@
+# =============================================================================
+# Lo que NO entra en el contexto de construccion del frontend.
+# =============================================================================
+
+# El pesado. Se reinstala dentro de la imagen con `npm ci`, y el de Windows
+# puede traer binarios compilados para otra plataforma.
+node_modules/
+
+# Compilacion previa: la imagen genera la suya.
+dist/
+build/
+
+# Configuracion de maquina. `.env.development` apunta a localhost:5121 y
+# pisaria el valor `/api` que la imagen necesita.
+.env
+.env.*
+!.env.example
+
+# Editores, registros y control de versiones.
+.vscode/
+.idea/
+*.log
+npm-debug.log*
+.git/
+.gitignore
+
+# Contenedores.
+Dockerfile*
+.dockerignore

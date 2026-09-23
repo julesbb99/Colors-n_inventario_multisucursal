@@ -18,12 +18,17 @@ namespace Colorsin.Application.Compras.DTOs;
 /// </summary>
 /// <param name="OrdenCompraId">Orden que se recibe.</param>
 /// <param name="Lineas">
-/// Que llego en esta entrega.
+/// Que llego en esta entrega. OBLIGATORIA, y con al menos una linea.
 ///
-/// Vacia o nula significa "llego todo lo que faltaba", que es el caso comun de
-/// una entrega completa. Si se indica, SOLO se reciben las lineas listadas: las
-/// que no aparezcan quedan pendientes para una entrega posterior. Es lo que
-/// permite decir "de las tres lineas solo llego la primera".
+/// Antes, vacia significaba "llego todo lo que faltaba". Ese atajo ya no cabe:
+/// cada linea tiene que traer su numero de lote y su caducidad, y ninguno de los
+/// dos se puede deducir de la orden -se leen de la etiqueta del envase cuando el
+/// camion descarga-. Una entrega sin lineas se rechaza con
+/// <see cref="ErrorCompra.NumeroLoteRequerido"/>.
+///
+/// SOLO se reciben las lineas listadas: las que no aparezcan quedan pendientes
+/// para una entrega posterior. Es lo que permite decir "de las tres lineas solo
+/// llego la primera".
 /// </param>
 /// <param name="Observaciones">Nota que se copia a cada movimiento generado.</param>
 public sealed record ConfirmarRecepcionDto(
@@ -50,8 +55,12 @@ public sealed record ConfirmarRecepcionDto(
 /// equivocada.
 /// </param>
 /// <param name="NumeroLote">
-/// Numero impreso por el fabricante. Opcional: sin el, la entrega sube el saldo
-/// de la sede sin trazabilidad por lote.
+/// Numero impreso por el fabricante. OBLIGATORIO.
+///
+/// Sin el, la entrega subiria el saldo de la sede sin quedar atada a ninguna
+/// fila de `lotes`, y con eso se pierden de golpe la trazabilidad hacia el
+/// fabricante y el sitio donde vive la caducidad. Una entrega sin numero se
+/// rechaza con <see cref="ErrorCompra.NumeroLoteRequerido"/>.
 ///
 /// Si la sede ya tiene ese numero para ese producto, se le suma la cantidad en
 /// vez de crear otra fila: un mismo numero de lote es el mismo lote, llegue en
@@ -59,8 +68,20 @@ public sealed record ConfirmarRecepcionDto(
 /// `ux_lotes_producto_sucursal_numero` lo garantiza a nivel de motor.
 /// </param>
 /// <param name="FechaVencimiento">
-/// Caducidad del lote. Nula en productos que no caducan, lo que los manda al
-/// final de la cola FEFO. Si el lote ya existia, NO se sobrescribe.
+/// Caducidad del lote. OBLIGATORIA.
+///
+/// Todo lo que vende Colorsin caduca, y esta es la clave con la que se ordena la
+/// cola FEFO y se disparan las alertas. Se rechaza con
+/// <see cref="ErrorCompra.FechaVencimientoRequerida"/>, y la propia columna
+/// `lotes.fecha_vencimiento` es NOT NULL desde
+/// `20_lote_vencimiento_obligatorio.sql`.
+///
+/// Si el lote ya existia, NO se sobrescribe: ver <c>RegistrarLoteAsync</c>.
+///
+/// SIGUEN SIENDO ANULABLES EN EL TIPO aunque el negocio las exija. Un
+/// `DateOnly` no anulable haria que una peticion sin fecha reventara al
+/// deserializar y volviera como un 400 generico de model binding; asi llega
+/// vacia y se contesta con el motivo y el nombre del producto.
 /// </param>
 public sealed record LineaRecepcionDto(
     int DetalleId,

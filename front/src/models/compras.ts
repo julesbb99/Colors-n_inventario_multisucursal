@@ -170,19 +170,22 @@ export interface CrearOrdenCompraDto {
  * Una linea de la recepcion.
  *
  * `cantidad` nula significa "llego todo lo que faltaba de esta linea".
- * `numeroLote` crea o alimenta el lote: si ya existe uno con ese numero en la
- * sede, se le suma cantidad en vez de abrir otro.
+ *
+ * `numeroLote` y `fechaVencimiento` son OBLIGATORIOS, y los dos se leen de la
+ * misma etiqueta del envase al descargar. El numero crea o alimenta el lote: si
+ * la sede ya tiene uno con ese numero para ese producto, se le suma la cantidad
+ * en vez de abrir otro, y en ese caso la fecha que ya tenia NO se pisa.
  */
 export interface LineaRecepcionDto {
   detalleId: number;
   cantidad?: number | null;
-  numeroLote?: string | null;
-  fechaVencimiento?: string | null;
+  numeroLote: string;
+  fechaVencimiento: string;
 }
 
-/** Cuerpo vacio -sin `lineas`- significa "llego todo lo que faltaba de la orden". */
+/** `lineas` es obligatoria: sin ella no hay donde poner el lote ni la caducidad. */
 export interface ConfirmarRecepcionDto {
   ordenCompraId: number;
-  lineas?: LineaRecepcionDto[] | null;
+  lineas: LineaRecepcionDto[];
   observaciones?: string | null;
 }

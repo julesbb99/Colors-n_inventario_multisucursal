@@ -4,7 +4,7 @@ import { Modal } from '../ui/Modal';
 import { Boton } from '../ui/Boton';
 import { Alerta } from '../ui/Alerta';
 import { Spinner } from '../ui/Spinner';
-import { CampoNumero, CampoSelect, CampoTexto } from '../ui/Campos';
+import { aNumero, CampoNumero, CampoSelect, CampoTexto } from '../ui/Campos';
 import { StatusBadge } from '../ui/StatusBadge';
 import { useConsulta } from '../../hooks/useConsulta';
 import { useEnvio } from '../../hooks/useEnvio';
@@ -90,8 +90,8 @@ export function GestionTransportadoras({
       return;
     }
 
-    const diasEntrega = Number(dias);
-    if (!Number.isInteger(diasEntrega) || diasEntrega < 1) {
+    const diasEntrega = aNumero(dias);
+    if (diasEntrega === null || !Number.isInteger(diasEntrega) || diasEntrega < 1) {
       setValidacion(
         'El plazo debe ser un número entero de al menos 1 día. Un traslado que llega el mismo ' +
           'día que sale no necesita transportadora.',
@@ -214,7 +214,7 @@ export function GestionTransportadoras({
                 etiqueta="Días de entrega"
                 valor={dias}
                 onCambio={setDias}
-                min={1}
+                entero
                 requerido
                 disabled={enviando}
                 ayuda="Entre sedes. Es lo que fija la fecha."

@@ -30,13 +30,17 @@ const ESTADO_BADGE: Record<EstadoCaducidad, EstadoBadge> = {
  */
 const DIAS_UMBRAL = 30;
 
-type Pestana = 'todos' | 'porvencer' | 'vencidos' | 'sinfecha';
+// Aqui habia una cuarta pestaña, «Sin caducidad». Se fue con la fecha
+// obligatoria: la columna `lotes.fecha_vencimiento` es NOT NULL, y tanto la
+// recepcion de compras como la correccion de un lote exigen la fecha. Una
+// pestaña que solo puede salir en cero no informa, hace dudar de si el dato
+// falta o de si el filtro esta roto.
+type Pestana = 'todos' | 'porvencer' | 'vencidos';
 
 const PESTANAS: { id: Pestana; etiqueta: string }[] = [
   { id: 'todos', etiqueta: 'Todos' },
   { id: 'porvencer', etiqueta: 'Por vencer' },
   { id: 'vencidos', etiqueta: 'Vencidos' },
-  { id: 'sinfecha', etiqueta: 'Sin caducidad' },
 ];
 
 const VACIO_POR_PESTANA: Record<Pestana, string> = {
@@ -44,8 +48,6 @@ const VACIO_POR_PESTANA: Record<Pestana, string> = {
   porvencer: 'Ningún lote con existencias caduca dentro del umbral.',
   vencidos:
     'Ningún lote vencido con existencias. Cuando aparezca uno sale de primero, porque ya no se puede despachar y hay que darlo de baja con un movimiento de ajuste.',
-  sinfecha:
-    'Todos los lotes tienen fecha. Un lote sin caducidad va al final de la cola FEFO y no entra en las alertas de vencimiento.',
 };
 
 const SIN_DATOS: LoteDto[] = [];
@@ -159,7 +161,6 @@ export function LotesFefo() {
       todos: visibles.length,
       porvencer: visibles.filter((l) => estadoCaducidad(l, DIAS_UMBRAL) === 'Por vencer').length,
       vencidos: visibles.filter((l) => l.vencido).length,
-      sinfecha: visibles.filter((l) => l.fechaVencimiento === null).length,
     }),
     [visibles],
   );
@@ -170,9 +171,6 @@ export function LotesFefo() {
     }
     if (pestana === 'vencidos') {
       return visibles.filter((l) => l.vencido);
-    }
-    if (pestana === 'sinfecha') {
-      return visibles.filter((l) => l.fechaVencimiento === null);
     }
     return visibles;
   }, [visibles, pestana]);

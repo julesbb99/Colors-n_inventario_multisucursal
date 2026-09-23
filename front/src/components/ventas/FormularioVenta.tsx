@@ -4,7 +4,7 @@ import { Modal } from '../ui/Modal';
 import { Boton } from '../ui/Boton';
 import { Alerta } from '../ui/Alerta';
 import { Spinner } from '../ui/Spinner';
-import { CampoNumero, CampoSelect, CampoArea } from '../ui/Campos';
+import { aNumero, aTexto, CampoNumero, CampoSelect, CampoArea } from '../ui/Campos';
 import { CampoSede } from '../ui/CampoSede';
 import { useSede } from '../../hooks/useSede';
 import { useCatalogos } from '../../hooks/useCatalogos';
@@ -246,7 +246,7 @@ export function FormularioVenta({ onCerrar, onRegistrada }: FormularioVentaProps
               ...linea,
               precioBase: referencia.precioBase,
               origenPrecio: referencia.origen,
-              precioUnitario: enLinea === null ? linea.precioUnitario : String(enLinea),
+              precioUnitario: enLinea === null ? linea.precioUnitario : aTexto(enLinea),
             };
           }),
         );
@@ -279,7 +279,7 @@ export function FormularioVenta({ onCerrar, onRegistrada }: FormularioVentaProps
     const precio = enUnidad(linea.precioBase, unidadBaseId, Number(unidadId));
     actualizarLinea(clave, {
       unidadId,
-      precioUnitario: precio === null ? linea.precioUnitario : String(precio),
+      precioUnitario: precio === null ? linea.precioUnitario : aTexto(precio),
       origenPrecio: precio === null ? null : linea.origenPrecio,
     });
   }
@@ -298,10 +298,10 @@ export function FormularioVenta({ onCerrar, onRegistrada }: FormularioVentaProps
   const totalEstimado = useMemo(
     () =>
       lineas.reduce((suma, linea) => {
-        const cantidad = Number(linea.cantidad);
-        const precio = Number(linea.precioUnitario);
-        const descuento = Number(linea.descuento) || 0;
-        if (!Number.isFinite(cantidad) || !Number.isFinite(precio)) {
+        const cantidad = aNumero(linea.cantidad);
+        const precio = aNumero(linea.precioUnitario);
+        const descuento = aNumero(linea.descuento) ?? 0;
+        if (cantidad === null || precio === null) {
           return suma;
         }
         return suma + cantidad * precio * (1 - descuento / 100);
@@ -327,8 +327,8 @@ export function FormularioVenta({ onCerrar, onRegistrada }: FormularioVentaProps
         setValidacion('Cada línea necesita producto, cantidad y unidad.');
         return;
       }
-      const cantidad = Number(linea.cantidad);
-      if (!Number.isFinite(cantidad) || cantidad <= 0) {
+      const cantidad = aNumero(linea.cantidad);
+      if (cantidad === null || cantidad <= 0) {
         setValidacion('La cantidad de cada línea debe ser mayor que cero.');
         return;
       }
@@ -339,9 +339,10 @@ export function FormularioVenta({ onCerrar, onRegistrada }: FormularioVentaProps
         unidadId: Number(linea.unidadId),
         // Nulo deja que el servidor use el de lista convertido a esta unidad, y
         // RECHAZA la venta si el producto tampoco lo tiene. Mandar 0 sería
-        // registrar una venta regalada, y por eso el vacío va como null.
-        precioUnitario: linea.precioUnitario === '' ? null : Number(linea.precioUnitario),
-        descuento: linea.descuento === '' ? 0 : Number(linea.descuento),
+        // registrar una venta regalada, y por eso el vacío va como null:
+        // `aNumero('')` ya devuelve null.
+        precioUnitario: aNumero(linea.precioUnitario),
+        descuento: aNumero(linea.descuento) ?? 0,
         // Sin `loteId`: el servidor descuenta por FEFO, que es lo correcto salvo
         // que alguien tenga un motivo para bajar un envase concreto.
       });
@@ -549,7 +550,7 @@ export function FormularioVenta({ onCerrar, onRegistrada }: FormularioVentaProps
           // luego se cambia de unidad, igual que con el autorrelleno.
           onUsarPrecio={(clave, precio, precioBase) =>
             actualizarLinea(clave, {
-              precioUnitario: String(precio),
+              precioUnitario: aTexto(precio),
               precioBase,
               origenPrecio: 'lista',
             })

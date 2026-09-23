@@ -3,7 +3,7 @@ import { Modal } from '../ui/Modal';
 import { Boton } from '../ui/Boton';
 import { Alerta } from '../ui/Alerta';
 import { Spinner } from '../ui/Spinner';
-import { CampoNumero, CampoSelect } from '../ui/Campos';
+import { aNumero, CampoNumero, CampoSelect } from '../ui/Campos';
 import { useSede } from '../../hooks/useSede';
 import { useCatalogos } from '../../hooks/useCatalogos';
 import { useEnvio } from '../../hooks/useEnvio';
@@ -66,8 +66,8 @@ export function FormularioSolicitud({ onCerrar, onSolicitada }: FormularioSolici
       setValidacion('El origen y el destino no pueden ser la misma sede.');
       return;
     }
-    const valorCantidad = Number(cantidad);
-    if (!Number.isFinite(valorCantidad) || valorCantidad <= 0) {
+    const valorCantidad = aNumero(cantidad);
+    if (valorCantidad === null || valorCantidad <= 0) {
       setValidacion('La cantidad debe ser mayor que cero.');
       return;
     }

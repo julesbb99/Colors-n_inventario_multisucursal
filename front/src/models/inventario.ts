@@ -123,63 +123,38 @@ export interface LoteDto {
   sucursalId: number;
   sucursalNombre: string;
   numeroLote: string;
-  /** Nula en productos que no caducan: van al final de la cola FEFO. */
-  fechaVencimiento: string | null;
+  /**
+   * Siempre viene. Todo lo que vende Colorsin caduca, la columna es NOT NULL y
+   * tanto la recepcion de compras como la correccion de un lote la exigen.
+   */
+  fechaVencimiento: string;
   cantidadBase: number | null;
   unidadBaseSimbolo: string | null;
   fechaIngreso: string | null;
-  /** Negativo si ya vencio, nulo si el lote no caduca. Lo calcula la API. */
+  /** Negativo si ya vencio. Lo calcula la API. */
   diasParaVencer: number | null;
   vencido: boolean;
 }
 
-/**
- * LOS ENUM DE ENTRADA VIAJAN COMO NUMERO.
- *
- * La API no registra `JsonStringEnumConverter`, asi que System.Text.Json espera
- * el valor ordinal. Mandar `"Ingreso"` da un 400 que no dice cual campo fallo.
- * El orden es el del enum del dominio y no se puede reordenar sin romper esto.
- */
-export const TIPO_MOVIMIENTO = { ingreso: 0, retiro: 1 } as const;
-export type ValorTipoMovimiento = (typeof TIPO_MOVIMIENTO)[keyof typeof TIPO_MOVIMIENTO];
-
-export const MOTIVO_MOVIMIENTO = {
-  compra: 0,
-  venta: 1,
-  ajuste: 2,
-  transferencia: 3,
-  merma: 4,
-  devolucion: 5,
-} as const;
-export type ValorMotivoMovimiento =
-  (typeof MOTIVO_MOVIMIENTO)[keyof typeof MOTIVO_MOVIMIENTO];
-
-/**
- * Un movimiento manual. El `usuarioId` NO va aqui: sale del token.
- *
- * Restringido a supervision: lo que entra por compras, sale por ventas o se
- * mueve por traslados tiene su propio documento detras. Un movimiento a mano es
- * la unica forma de cambiar el stock sin uno.
- */
-export interface RegistrarMovimientoDto {
-  sucursalId: number;
-  productoId: number;
-  tipoMovimiento: ValorTipoMovimiento;
-  motivo: ValorMotivoMovimiento;
-  cantidad: number;
-  unidadId: number;
-  /** Imputa el movimiento a un lote concreto. Opcional. */
-  loteId?: number | null;
-  observaciones?: string | null;
-}
+// Aqui estaban TIPO_MOVIMIENTO, MOTIVO_MOVIMIENTO y RegistrarMovimientoDto. Se
+// fueron con el ajuste manual de stock, que ya no existe en ningun rol: eran de
+// ENTRADA -lo que se mandaba al crear un movimiento a mano- y no hay quien los
+// mande. Los movimientos se siguen LEYENDO en el libro mayor, pero ahi el tipo y
+// el motivo llegan como texto ya resuelto en `MovimientoDto`, sin ordinales.
 
 // Aqui estaba CrearLoteDto. Ya no hay alta de lotes: nacen al recibir una compra
 // o un traslado, con el numero que trae el envase.
 
-/** Correccion de un lote. Es un PUT: `fechaVencimiento` nula BORRA la fecha. */
+/**
+ * Correccion de un lote.
+ *
+ * Es un PUT, asi que el cuerpo describe como debe quedar el lote: hay que
+ * mandar los dos campos, aunque solo cambie uno. La caducidad se puede
+ * corregir, pero NO borrar.
+ */
 export interface ActualizarLoteDto {
   numeroLote: string;
-  fechaVencimiento?: string | null;
+  fechaVencimiento: string;
 }
 
 /** Los tres estados de caducidad que pinta la interfaz. */

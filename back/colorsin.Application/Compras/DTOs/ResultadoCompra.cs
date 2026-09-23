@@ -86,6 +86,25 @@ public enum ErrorCompra
     NadaPorRecibir,
 
     /// <summary>
+    /// Una linea de la entrega llego sin el numero de lote impreso en el envase.
+    ///
+    /// Es obligatorio: sin el, la mercancia sube el saldo de la sede pero no
+    /// queda atada a ninguna fila de `lotes`, y con ella se pierden a la vez la
+    /// trazabilidad hacia el fabricante y el sitio donde vive la caducidad.
+    /// </summary>
+    NumeroLoteRequerido,
+
+    /// <summary>
+    /// Una linea de la entrega llego sin fecha de caducidad.
+    ///
+    /// Es obligatoria porque todo lo que vende Colorsin caduca, y porque es la
+    /// clave con la que se ordena la cola FEFO y se disparan las alertas de
+    /// vencimiento. Un lote sin fecha seria el ultimo en despacharse y el unico
+    /// del que nadie avisa.
+    /// </summary>
+    FechaVencimientoRequerida,
+
+    /// <summary>
     /// Se intento editar o retirar una orden que ya salio de 'Pendiente'.
     ///
     /// Una orden deja de ser un borrador en cuanto se confirma o entra

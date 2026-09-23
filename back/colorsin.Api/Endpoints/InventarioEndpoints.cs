@@ -233,44 +233,32 @@ public static class InventarioEndpoints
         // ---------------------------------------------------------------------
         // Escritura
         // ---------------------------------------------------------------------
-        grupo.MapPost("/movimientos", async (
-                RegistrarMovimientoDto peticion,
-                IInventarioService inventario,
-                IUsuarioContexto contexto,
-                CancellationToken cancellationToken) =>
-            {
-                contexto.ExigirAccesoASucursal(peticion.SucursalId);
-
-                var resultado = await inventario.RegistrarMovimientoAsync(
-                    peticion, contexto.UsuarioIdRequerido(), cancellationToken);
-
-                return resultado.Exito
-                    ? Results.Ok(resultado)
-                    : RespuestasHttp.Fallo(
-                        CodigoDe(resultado.Error), "Movimiento rechazado", resultado.Mensaje);
-            })
-            .WithName("InventarioRegistrarMovimiento")
-            .WithSummary("Registra una entrada o salida de stock. Solo supervision.")
-            .WithDescription(
-                "La cantidad va en la unidad que tenga a mano el operario; el servicio convierte " +
-                "a la unidad base del producto. El responsable NO se manda en el cuerpo: sale del " +
-                "token. Un retiro que deje el saldo en negativo se rechaza con 409. " +
-                "Restringido a Administrador General y Gerente de Sucursal.")
-            .Produces<ResultadoMovimiento>()
-            // Supervision, y esta no venia en la lista que se pidio: es una
-            // inferencia, explicada aqui para que se pueda discutir.
-            //
-            // Lo que entra por compras, sale por ventas o se mueve por traslados
-            // tiene su propio flujo y su propio documento detras. Un movimiento
-            // registrado a mano es lo que queda: un ajuste, una merma, una
-            // devolucion. Es decir, la unica forma de cambiar el stock SIN un
-            // documento que lo respalde, y por eso mismo la via por la que se
-            // tapa un faltante.
-            //
-            // Si en la operacion real el operador es quien reporta la merma
-            // -que es razonable, es quien ve el envase roto- esto hay que
-            // abrirlo; pero conviene que sea una decision tomada, no un descuido.
-            .RequireAuthorization(PoliticasAutorizacion.Supervision);
+        // AQUI VIVIA POST /movimientos, el ajuste manual de stock. Se quito para
+        // TODOS los roles, supervision incluida, y conviene dejar escrito por que.
+        //
+        // Era la unica forma de cambiar el stock SIN un documento detras. Todo lo
+        // demas tiene uno: lo que entra viene de una orden de compra recibida, lo
+        // que sale de una venta, y lo que cambia de sede de un traslado. El
+        // movimiento a mano era la puerta por la que un saldo podia cuadrarse sin
+        // que nada explicara de donde salio la diferencia, que es tambien la
+        // puerta por la que se tapa un faltante.
+        //
+        // NO ES SOLO QUITAR EL BOTON. La pantalla ya no lo ofrece, pero la ruta
+        // seguia abierta a cualquiera con un token de supervision y un cliente
+        // HTTP. Una regla que solo vive en la interfaz no es una regla.
+        //
+        // QUE SE PIERDE, para que se pueda revertir a sabiendas: ya no hay forma
+        // de registrar una merma, una devolucion ni un ajuste por conteo fisico.
+        // Si aparece esa necesidad, lo suyo no es reabrir esta ruta tal cual sino
+        // darle su propio flujo con motivo obligatorio y su documento, como
+        // tienen las otras tres vias.
+        //
+        // InventarioService.RegistrarMovimientoAsync SIGUE EXISTIENDO, sin nadie
+        // que lo llame. Se deja a proposito -es la pieza sobre la que se montaria
+        // ese flujo- pero conviene saber que ya no es alcanzable desde fuera: la
+        // unica puerta era esta.
+        //
+        // GET /movimientos se queda: leer el libro mayor no lo escribe.
 
         // ---------------------------------------------------------------------
         // Lotes: alta y correccion
@@ -387,8 +375,8 @@ public static class InventarioEndpoints
             .WithDescription(
                 "NO recibe cantidad, por el mismo motivo que el alta de lotes: el saldo solo se " +
                 "mueve por el libro mayor, donde cada asiento dice de donde salio la mercancia. " +
-                "La existencia nace en CERO y se llena con POST /api/inventario/movimientos, con " +
-                "una recepcion de compra o con un traslado. " +
+                "La existencia nace en CERO y se llena con una recepcion de compra o con un " +
+                "traslado, que son las dos unicas vias que la suben. " +
                 "Si la pareja (sede, producto) ya existe pero esta deshabilitada, la REACTIVA con " +
                 "el saldo que tenia en vez de fallar: el indice unico no deja crear otra fila, " +
                 "asi que negarse dejaria a la persona sin salida.")

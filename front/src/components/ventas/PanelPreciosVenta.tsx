@@ -5,6 +5,7 @@ import { obtenerPrecioVenta } from '../../services/ventas';
 import type { PrecioVentaDto } from '../../models/ventas';
 import { convertirCosto, factorPorSimbolo } from '../../utils/unidades';
 import { formatearCOP, formatearFechaSolo } from '../../utils/formato';
+import { aNumero } from '../ui/Campos';
 
 /** Lo mínimo que el panel necesita saber de cada línea de la venta. */
 export interface LineaVentaConsultable {
@@ -225,9 +226,12 @@ export function PanelPreciosVenta({
             // arriba. Es la cifra sobre la que se juzga el margen: el precio de
             // lista puede estar bien y la línea seguir llevando otro número.
             const unidadLinea = unidades.find((u) => u.id === Number(linea.unidadId));
-            const escrito = Number(linea.precioUnitario);
+            // El campo vacío cuenta como CERO, no como «no se sabe»: es lo que
+            // hace que el botón de abajo se ofrezca cuando el autorrelleno no
+            // encontró precio y la línea quedó en blanco.
+            const escrito = aNumero(linea.precioUnitario) ?? 0;
             const cobrado =
-              Number.isFinite(escrito) && escrito > 0 && unidadLinea
+              escrito > 0 && unidadLinea
                 ? aUnidadElegida(escrito, unidadLinea.simbolo)
                 : null;
 

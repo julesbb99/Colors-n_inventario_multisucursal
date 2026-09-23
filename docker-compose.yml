@@ -1,3 +1,29 @@
+# =============================================================================
+# Colorsin S.A.S. — sistema completo con un solo comando
+#
+#   docker compose up -d
+#
+# Eso levanta la base de datos, la API y el frontend. No hace falta tener
+# instalados .NET, Node ni MySQL: las imagenes vienen de Docker Hub y Compose
+# las descarga si no estan. Tampoco hace falta crear ningun archivo: todas las
+# variables de abajo traen un valor por defecto de desarrollo.
+#
+#   Aplicacion   http://localhost:8080
+#   API          http://localhost:5121
+#   MySQL        localhost:3307
+#
+# PARA RECONSTRUIR LAS IMAGENES desde el codigo en vez de bajarlas:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# SOBRE LOS VALORES POR DEFECTO. Son de desarrollo y estan a la vista a
+# proposito: el requisito era que esto arrancara sin configurar nada. Para
+# cualquier uso real se sobrescriben creando un `.env` junto a este archivo
+# -Compose lo carga solo- o exportando las variables en el entorno. El `.env` no
+# se versiona; la plantilla `.env.example` si.
+#
+# La clave de firma de los tokens NO esta aqui, y no es un olvido: se genera
+# sola dentro del contenedor de la API. Ver `back/entrypoint.sh`.
+# =============================================================================
 name: colorsin
 
 services:
@@ -28,10 +54,10 @@ services:
       - --long-query-time=1
 
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-colorsin_dev_root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-colorsin_inventario}
+      MYSQL_USER: ${MYSQL_USER:-colorsin}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-colorsin_dev_app}
       TZ: America/Bogota
 
     ports:
@@ -64,30 +90,96 @@ services:
       - colorsin_net
 
   # ---------------------------------------------------------------------------
-  # API .NET — descomenta cuando exista el proyecto y su Dockerfile.
-  # `condition: service_healthy` es lo que hace que la API NO arranque hasta que
-  # el healthcheck de arriba esté en verde.
+  # API .NET 10
   # ---------------------------------------------------------------------------
-  # api:
-  #   build:
-  #     context: .
-  #     dockerfile: src/Colorsin.Api/Dockerfile
-  #   container_name: colorsin_api
-  #   restart: unless-stopped
-  #   depends_on:
-  #     mysql:
-  #       condition: service_healthy
-  #   environment:
-  #     ASPNETCORE_ENVIRONMENT: Development
-  #     ConnectionStrings__Default: "Server=mysql;Port=3306;Database=${MYSQL_DATABASE};User Id=${MYSQL_USER};Password=${MYSQL_PASSWORD};TreatTinyAsBoolean=false;"
-  #   ports:
-  #     - "5080:8080"
-  #   networks:
-  #     - colorsin_net
+  api:
+    image: juliana0212/colorsin-api:1.0.0
+    container_name: colorsin_api
+    restart: unless-stopped
+
+    # `service_healthy` y no `service_started`: el contenedor de MySQL existe
+    # mucho antes de que la base este lista, y en el primer arranque hay veinte
+    # scripts de inicializacion por delante. Sin esperar al healthcheck, la API
+    # arranca, no encuentra las tablas y se cae.
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+    environment:
+      # Development deja encendido OpenAPI en /openapi/v1.json, util para
+      # revisar la API del contenedor. No expone secretos: appsettings.json solo
+      # lleva marcadores.
+      ASPNETCORE_ENVIRONMENT: Development
+
+      # `mysql` es el NOMBRE DEL SERVICIO, que la red interna de Compose
+      # resuelve. Y el puerto es 3306, no 3307: 3307 solo existe en el host.
+      # Entre contenedores se habla por el puerto real.
+      ConnectionStrings__DefaultConnection: >-
+        Server=mysql;Port=3306;Database=${MYSQL_DATABASE:-colorsin_inventario};Uid=${MYSQL_USER:-colorsin};Pwd=${MYSQL_PASSWORD:-colorsin_dev_app};
+
+      # El frontend llama por el mismo origen a traves de nginx, asi que en el
+      # camino normal no hay CORS. Esto es para quien abra la API directamente
+      # en localhost:5121 desde otra pagina.
+      Cors__OrigenesPermitidos__0: http://localhost:8080
+
+      # Sin valor por defecto a proposito: si no se define, el contenedor genera
+      # una clave aleatoria y la guarda en su volumen. Ver back/entrypoint.sh.
+      JwtSettings__SecretKey: ${JWT_SECRET_KEY:-}
+
+    ports:
+      - "5121:8080"
+
+    volumes:
+      # Guarda la clave de firma generada. Sin esto, cada reinicio invalidaria
+      # las sesiones abiertas.
+      - api_claves:/var/lib/colorsin
+
+    healthcheck:
+      # Comprueba que Kestrel escucha, usando /dev/tcp de bash: la imagen de
+      # Microsoft no trae curl ni wget, y anadirlos solo para esto engordaria la
+      # imagen. Que el puerto este abierto dice bastante en esta API, porque
+      # valida su configuracion AL ARRANCAR y no levanta si algo falta.
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/8080' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    networks:
+      - colorsin_net
+
+  # ---------------------------------------------------------------------------
+  # Frontend React, servido por nginx
+  # ---------------------------------------------------------------------------
+  front:
+    image: juliana0212/colorsin-front:1.0.0
+    container_name: colorsin_front
+    restart: unless-stopped
+
+    # nginx resuelve `api` al CARGAR su configuracion, no en cada peticion: si
+    # el nombre no existe todavia, no arranca y se queda reiniciandose.
+    depends_on:
+      api:
+        condition: service_healthy
+
+    ports:
+      - "8080:8080"
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+    networks:
+      - colorsin_net
 
 volumes:
   mysql_data:
     name: colorsin_mysql_data
+  api_claves:
+    name: colorsin_api_claves
 
 networks:
   colorsin_net:

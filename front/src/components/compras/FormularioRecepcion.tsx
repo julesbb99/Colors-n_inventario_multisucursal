@@ -3,7 +3,7 @@ import { Modal } from '../ui/Modal';
 import { Boton } from '../ui/Boton';
 import { Alerta } from '../ui/Alerta';
 import { Spinner, CargandoPanel } from '../ui/Spinner';
-import { CampoArea } from '../ui/Campos';
+import { aNumero, CampoArea, CampoNumero } from '../ui/Campos';
 import { useConsulta } from '../../hooks/useConsulta';
 import { useEnvio } from '../../hooks/useEnvio';
 import { obtenerOrdenCompra, recibirOrdenCompra } from '../../services/compras';
@@ -75,9 +75,10 @@ export function FormularioRecepcion({ orden, onCerrar, onRecibida }: FormularioR
    * el estado de la orden.
    */
   function comoQueda(pendiente: number, texto: string) {
-    const recibe = texto.trim() === '' ? pendiente : Number(texto);
+    // Vacío no es un error: significa «llegó todo lo que faltaba».
+    const recibe = texto.trim() === '' ? pendiente : aNumero(texto);
 
-    if (!Number.isFinite(recibe) || recibe < 0) {
+    if (recibe === null || recibe < 0) {
       return { tono: 'malo' as const, mensaje: 'Cantidad no válida.' };
     }
     if (recibe > pendiente) {
@@ -85,7 +86,7 @@ export function FormularioRecepcion({ orden, onCerrar, onRecibida }: FormularioR
       // que se digitó la línea equivocada, y recortar en silencio lo ocultaría.
       return {
         tono: 'malo' as const,
-        mensaje: `Son más de los ${pendiente} pendientes. El servidor lo va a rechazar.`,
+        mensaje: `Son más de los ${formatearVolumen(pendiente, null)} pendientes. El servidor lo va a rechazar.`,
       };
     }
     if (recibe === 0) {
@@ -96,7 +97,9 @@ export function FormularioRecepcion({ orden, onCerrar, onRecibida }: FormularioR
     }
     return {
       tono: 'parcial' as const,
-      mensaje: `Queda PARCIAL: faltarían ${pendiente - recibe}.`,
+      // Por `formatearVolumen` y no por resta cruda: 3 − 0,7 da
+      // 2.3000000000000003 en coma flotante, y eso es lo que se leería.
+      mensaje: `Queda PARCIAL: faltarían ${formatearVolumen(pendiente - recibe, null)}.`,
     };
   }
 
@@ -107,7 +110,24 @@ export function FormularioRecepcion({ orden, onCerrar, onRecibida }: FormularioR
     malo: 'text-red-700',
   } as const;
 
+  /**
+   * Las líneas a las que les falta el lote o la fecha.
+   *
+   * Se calcula en el render y no solo al enviar: es lo que pinta el aviso de
+   * arriba y desactiva el botón, para que no se llegue a pulsar y se descubra
+   * después. La API valida lo mismo, pero contesta de línea en línea —se para
+   * en la primera—, y aquí se pueden señalar todas de una vez.
+   */
+  const incompletas = pendientes.filter((detalle) => {
+    const borrador = borradores[detalle.id] ?? BORRADOR_VACIO;
+    return borrador.numeroLote.trim() === '' || borrador.fechaVencimiento === '';
+  });
+
   function alGuardar() {
+    if (incompletas.length > 0) {
+      return;
+    }
+
     const lineas: LineaRecepcionDto[] = pendientes.map((detalle) => {
       const borrador = borradores[detalle.id] ?? BORRADOR_VACIO;
 
@@ -115,10 +135,11 @@ export function FormularioRecepcion({ orden, onCerrar, onRecibida }: FormularioR
         detalleId: detalle.id,
         // Vacío significa "llegó todo lo que faltaba de esta línea". Es lo que
         // espera la API, y evita tener que teclear la cifra exacta en el caso
-        // normal, que es el de la entrega completa.
-        cantidad: borrador.cantidad === '' ? null : Number(borrador.cantidad),
-        numeroLote: borrador.numeroLote.trim() === '' ? null : borrador.numeroLote.trim(),
-        fechaVencimiento: borrador.fechaVencimiento === '' ? null : borrador.fechaVencimiento,
+        // normal, que es el de la entrega completa. `aNumero('')` ya da null.
+        cantidad: aNumero(borrador.cantidad),
+        // Estos dos sí van siempre: `incompletas` garantiza que no están vacíos.
+        numeroLote: borrador.numeroLote.trim(),
+        fechaVencimiento: borrador.fechaVencimiento,
       };
     });
 
@@ -142,7 +163,12 @@ export function FormularioRecepcion({ orden, onCerrar, onRecibida }: FormularioR
           <Boton variante="secundaria" onClick={onCerrar} disabled={enviando}>
             Cancelar
           </Boton>
-          <Boton onClick={alGuardar} disabled={enviando || cargando || pendientes.length === 0}>
+          <Boton
+            onClick={alGuardar}
+            disabled={
+              enviando || cargando || pendientes.length === 0 || incompletas.length > 0
+            }
+          >
             {enviando ? (
               <>
                 <Spinner etiqueta="Registrando" />
@@ -169,9 +195,26 @@ export function FormularioRecepcion({ orden, onCerrar, onRecibida }: FormularioR
           <>
             <p className="text-sm text-slate-500">
               Revisa línea por línea y escribe cuánto llegó de verdad. Si dejas la cantidad vacía
-              se recibe todo lo que falta de esa línea. El número de lote crea uno nuevo o suma al
-              que ya exista con ese número en la sede.
+              se recibe todo lo que falta de esa línea. El número de lote y la caducidad se leen
+              del envase y son obligatorios: el número crea el lote o suma al que ya exista con
+              ese número en la sede, y la fecha es la que ordena la cola FEFO.
             </p>
+
+            {/*
+              Aparece solo cuando falta algo, y NOMBRA los productos. Un aviso
+              genérico obligaría a recorrer las líneas una por una buscando cuál
+              quedó a medias, que es justo lo que hace falta cuando la orden trae
+              seis productos.
+            */}
+            {incompletas.length > 0 ? (
+              <Alerta tipo="info">
+                Falta el lote o la caducidad de{' '}
+                <span className="font-semibold">
+                  {incompletas.map((d) => d.productoNombre).join(', ')}
+                </span>
+                . Los dos vienen impresos en el envase.
+              </Alerta>
+            ) : null}
 
             <div className="flex flex-col gap-3">
               {pendientes.map((detalle) => (
@@ -192,23 +235,12 @@ export function FormularioRecepcion({ orden, onCerrar, onRecibida }: FormularioR
 
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     <div className="flex flex-col gap-1.5">
-                      <label
-                        htmlFor={`cant-${detalle.id}`}
-                        className="text-sm font-semibold text-slate-700"
-                      >
-                        Cantidad recibida
-                      </label>
-                      <input
-                        id={`cant-${detalle.id}`}
-                        type="number"
-                        inputMode="decimal"
-                        min={0}
-                        step="any"
+                      <CampoNumero
+                        etiqueta="Cantidad recibida"
+                        valor={borradores[detalle.id]?.cantidad ?? ''}
+                        onCambio={(v) => actualizar(detalle.id, { cantidad: v })}
                         disabled={enviando}
-                        value={borradores[detalle.id]?.cantidad ?? ''}
-                        onChange={(e) => actualizar(detalle.id, { cantidad: e.target.value })}
-                        placeholder={`Todo (${detalle.cantidadPendiente})`}
-                        className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm tabular-nums text-slate-900 outline-none focus:border-petroleo-500"
+                        placeholder={`Todo (${formatearVolumen(detalle.cantidadPendiente, null)})`}
                       />
                       {(() => {
                         const estado = comoQueda(
@@ -229,6 +261,7 @@ export function FormularioRecepcion({ orden, onCerrar, onRecibida }: FormularioR
                         className="text-sm font-semibold text-slate-700"
                       >
                         Número de lote
+                        <span className="ml-1 text-terracota-600">*</span>
                       </label>
                       <input
                         id={`lote-${detalle.id}`}
@@ -236,8 +269,15 @@ export function FormularioRecepcion({ orden, onCerrar, onRecibida }: FormularioR
                         disabled={enviando}
                         value={borradores[detalle.id]?.numeroLote ?? ''}
                         onChange={(e) => actualizar(detalle.id, { numeroLote: e.target.value })}
-                        placeholder="Opcional"
-                        className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-petroleo-500"
+                        placeholder="El del envase"
+                        // El borde en ámbar mientras falta: señala la casilla
+                        // concreta, que es lo que el aviso de arriba no puede
+                        // hacer cuando la orden trae varias líneas.
+                        className={`h-11 w-full rounded-lg border bg-white px-3 text-sm text-slate-900 outline-none focus:border-petroleo-500 ${
+                          (borradores[detalle.id]?.numeroLote ?? '').trim() === ''
+                            ? 'border-amber-400'
+                            : 'border-slate-300'
+                        }`}
                       />
                     </div>
 
@@ -247,6 +287,7 @@ export function FormularioRecepcion({ orden, onCerrar, onRecibida }: FormularioR
                         className="text-sm font-semibold text-slate-700"
                       >
                         Vencimiento
+                        <span className="ml-1 text-terracota-600">*</span>
                       </label>
                       <input
                         id={`vence-${detalle.id}`}
@@ -256,7 +297,11 @@ export function FormularioRecepcion({ orden, onCerrar, onRecibida }: FormularioR
                         onChange={(e) =>
                           actualizar(detalle.id, { fechaVencimiento: e.target.value })
                         }
-                        className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-petroleo-500"
+                        className={`h-11 w-full rounded-lg border bg-white px-3 text-sm tabular-nums text-slate-900 outline-none focus:border-petroleo-500 ${
+                          (borradores[detalle.id]?.fechaVencimiento ?? '') === ''
+                            ? 'border-amber-400'
+                            : 'border-slate-300'
+                        }`}
                       />
                     </div>
                   </div>

@@ -1,0 +1,32 @@
+# =============================================================================
+# Capa de construccion: reconstruir las imagenes desde el codigo local.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# POR QUE UN ARCHIVO APARTE Y NO `build:` EN EL PRINCIPAL. Cuando un servicio
+# declara `build:`, `docker compose up` COMPILA en vez de descargar si la imagen
+# no esta en la maquina. Eso obligaria a tener el SDK de .NET y Node instalados,
+# que es justo lo que se queria evitar: el compose principal solo nombra
+# imagenes, asi que se bajan de Docker Hub y arranca en una maquina limpia.
+#
+# Aqui se anade `build:` encima, para cuando SI se quiere compilar: al
+# desarrollar, o para publicar una version nueva.
+#
+# Las etiquetas coinciden con las del principal, asi que lo que se construya
+# aqui es lo que `docker push` sube.
+# =============================================================================
+
+services:
+  api:
+    build:
+      context: ./back
+      dockerfile: Dockerfile
+
+  front:
+    build:
+      context: ./front
+      dockerfile: Dockerfile
+      args:
+        # Relativa a proposito: el navegador pide al mismo origen que sirvio la
+        # pagina y nginx reenvia a la API. Ver front/nginx.conf.
+        VITE_API_URL: /api

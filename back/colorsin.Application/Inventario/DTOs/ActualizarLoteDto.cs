@@ -29,12 +29,20 @@ namespace Colorsin.Application.Inventario.DTOs;
 /// (producto, sede).
 /// </param>
 /// <param name="FechaVencimiento">
-/// La nueva caducidad, o nula para dejar el lote como "no caduca".
+/// La nueva caducidad. OBLIGATORIA: se puede corregir, pero no borrar.
 ///
-/// OJO: nula NO significa "no tocar este campo". Significa borrar la fecha. Es un
-/// PUT, o sea un reemplazo completo del estado editable: el cuerpo describe como
-/// debe quedar el lote, no que campos mover. Para cambiar solo uno hay que mandar
-/// el otro con su valor actual.
+/// Antes, nula dejaba el lote como "no caduca". Ya no: todo lo que vende
+/// Colorsin caduca, la columna `lotes.fecha_vencimiento` es NOT NULL y una
+/// peticion sin fecha se rechaza con
+/// <see cref="ErrorLote.VencimientoRequerido"/>. Si se admitiera, bastaria con
+/// recibir el lote con fecha y borrarsela aqui para dejarlo fuera de las alertas.
+///
+/// SIGUE SIENDO ANULABLE EN EL TIPO para poder contestar ese rechazo con su
+/// motivo: con un `DateOnly` a secas, la peticion sin fecha reventaria al
+/// deserializar y volveria como un 400 generico.
+///
+/// OJO, ES UN PUT: el cuerpo describe como debe quedar el lote, no que campos
+/// mover. Para cambiar solo uno hay que mandar el otro con su valor actual.
 /// </param>
 public sealed record ActualizarLoteDto(
     string NumeroLote,

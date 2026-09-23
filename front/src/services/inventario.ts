@@ -7,7 +7,6 @@ import type {
   ExistenciaDto,
   LoteDto,
   ProductoDto,
-  RegistrarMovimientoDto,
 } from '../models/inventario';
 
 /**
@@ -129,19 +128,13 @@ export async function obtenerProductos(categoria?: string): Promise<ProductoDto[
 }
 
 // -----------------------------------------------------------------------------
-// Escritura. Las tres exigen supervision: la API responde 403 a un operador.
+// Escritura. Exigen supervision: la API responde 403 a un operador.
 // -----------------------------------------------------------------------------
 
-/**
- * Registra una entrada o salida de stock a mano.
- *
- * Es la unica via que cambia el saldo SIN un documento detras -un ajuste, una
- * merma, una devolucion- y por eso mismo la que hay que vigilar.
- */
-export async function registrarMovimiento(peticion: RegistrarMovimientoDto) {
-  const { data } = await axiosInstance.post('/inventario/movimientos', peticion);
-  return data;
-}
+// Aqui estaba registrarMovimiento(). Se quito con su endpoint, y para todos los
+// roles: era la unica via que cambiaba el saldo SIN un documento detras. El
+// stock se mueve ahora solo por compras, ventas y traslados, que si explican de
+// donde salio cada litro.
 
 // Aqui estaba crearLote(). Se quito con su endpoint: el numero de lote y su
 // vencimiento los pone el fabricante y llegan impresos en el envase, asi que no
@@ -149,7 +142,7 @@ export async function registrarMovimiento(peticion: RegistrarMovimientoDto) {
 // -con el numero de la factura- o un traslado, que recrea en el destino el que
 // salio del origen. Corregir un lote -actualizarLote, aqui abajo- si sigue.
 
-/** Corrige numero y caducidad. PUT: lo que no venga se borra, no se conserva. */
+/** Corrige numero y caducidad. PUT: hay que mandar los dos campos. */
 export async function actualizarLote(id: number, peticion: ActualizarLoteDto) {
   const { data } = await axiosInstance.put(`/inventario/lotes/${id}`, peticion);
   return data;

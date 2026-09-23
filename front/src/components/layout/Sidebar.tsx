@@ -5,7 +5,6 @@ import {
   Layers,
   LayoutDashboard,
   Receipt,
-  Settings,
   ShoppingCart,
   Users,
 } from 'lucide-react';
@@ -14,17 +13,7 @@ import { useAuth } from '../../hooks/useAuth';
 
 interface ItemNav {
   etiqueta: string;
-  /**
-   * Ruta destino, o `null` si la pantalla todavia no existe.
-   *
-   * Los cinco modulos con `null` ya tienen endpoints en la API pero no tienen
-   * pagina. Se listan igual -el menu completo comunica el alcance del sistema-
-   * pero NO como enlace: el enrutador manda cualquier ruta desconocida al panel,
-   * asi que un enlace a /compras devolveria al usuario al inicio sin explicacion,
-   * que se lee como un error de la aplicacion. Un elemento deshabilitado dice la
-   * verdad: existe, todavia no.
-   */
-  ruta: string | null;
+  ruta: string;
   Icono: LucideIcon;
   /** `end` evita que "/" quede marcado como activo en todas las rutas hijas. */
   exacta?: boolean;
@@ -36,6 +25,11 @@ interface ItemNav {
   soloSupervision?: boolean;
 }
 
+// Aqui habia un octavo elemento, «Configuración», sin pantalla detras y marcado
+// «pronto». Se fue porque no va a haberla: un menu que anuncia algo que no
+// llegara no informa del alcance del sistema, solo deja esperando. Con el se fue
+// tambien la rama que pintaba elementos deshabilitados, que era la unica que la
+// usaba.
 const ITEMS: ItemNav[] = [
   { etiqueta: 'Dashboard', ruta: '/', Icono: LayoutDashboard, exacta: true },
   { etiqueta: 'Existencias', ruta: '/inventario/existencias', Icono: Boxes },
@@ -44,7 +38,6 @@ const ITEMS: ItemNav[] = [
   { etiqueta: 'Compras', ruta: '/compras', Icono: ShoppingCart },
   { etiqueta: 'Ventas', ruta: '/ventas', Icono: Receipt },
   { etiqueta: 'Usuarios', ruta: '/usuarios', Icono: Users, soloSupervision: true },
-  { etiqueta: 'Configuración', ruta: null, Icono: Settings },
 ];
 
 /**
@@ -65,39 +58,23 @@ export function Sidebar() {
   return (
     <aside className="flex w-56 shrink-0 flex-col bg-petroleo-800 py-4">
       <nav aria-label="Secciones" className="flex flex-col gap-0.5">
-        {visibles.map(({ etiqueta, ruta, Icono, exacta }) =>
-          ruta === null ? (
-            <button
-              key={etiqueta}
-              type="button"
-              disabled
-              title="Módulo pendiente de construir"
-              className={`${BASE_ITEM} w-full cursor-not-allowed border-transparent text-left font-medium text-petroleo-300/70`}
-            >
-              <Icono size={18} aria-hidden="true" />
-              <span className="flex-1">{etiqueta}</span>
-              <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
-                pronto
-              </span>
-            </button>
-          ) : (
-            <NavLink
-              key={etiqueta}
-              to={ruta}
-              end={exacta}
-              className={({ isActive }) =>
-                `${BASE_ITEM} ${
-                  isActive
-                    ? 'border-terracota-500 bg-petroleo-700 font-semibold text-white'
-                    : 'border-transparent font-medium text-petroleo-100 hover:bg-petroleo-700/60 hover:text-white'
-                }`
-              }
-            >
-              <Icono size={18} aria-hidden="true" />
-              <span className="flex-1">{etiqueta}</span>
-            </NavLink>
-          ),
-        )}
+        {visibles.map(({ etiqueta, ruta, Icono, exacta }) => (
+          <NavLink
+            key={etiqueta}
+            to={ruta}
+            end={exacta}
+            className={({ isActive }) =>
+              `${BASE_ITEM} ${
+                isActive
+                  ? 'border-terracota-500 bg-petroleo-700 font-semibold text-white'
+                  : 'border-transparent font-medium text-petroleo-100 hover:bg-petroleo-700/60 hover:text-white'
+              }`
+            }
+          >
+            <Icono size={18} aria-hidden="true" />
+            <span className="flex-1">{etiqueta}</span>
+          </NavLink>
+        ))}
       </nav>
     </aside>
   );

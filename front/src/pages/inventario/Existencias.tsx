@@ -13,7 +13,6 @@ import {
 import { estadoExistencia } from '../../models/inventario';
 import type { ExistenciaDto } from '../../models/inventario';
 import { TablaExistencias } from '../../components/inventario/TablaExistencias';
-import { FormularioMovimiento } from '../../components/inventario/FormularioMovimiento';
 import { FormularioExistencia } from '../../components/inventario/FormularioExistencia';
 import { Alerta } from '../../components/ui/Alerta';
 import { Boton } from '../../components/ui/Boton';
@@ -47,7 +46,6 @@ export function Existencias() {
 
   const [pestana, setPestana] = useState<Pestana>('todas');
   const [busqueda, setBusqueda] = useState('');
-  const [abierto, setAbierto] = useState(false);
   const [unidadElegida, setUnidadElegida] = useState<number | null>(null);
 
   // ESTA PANTALLA TIENE SU PROPIO FILTRO DE SEDE, aparte del selector de la
@@ -317,19 +315,12 @@ export function Existencias() {
           </Boton>
         ) : null}
 
-        {/* Un movimiento a mano es la única vía que cambia el stock sin un
-            documento detrás: solo supervisión, igual que en la API. */}
-        {esSupervision ? (
-          <Boton onClick={() => setAbierto(true)}>
-            <Plus size={17} aria-hidden="true" />
-            Registrar movimiento
-          </Boton>
-        ) : null}
+        {/* Aquí estaba «Registrar movimiento», el ajuste manual de stock. Se
+            quitó para todos los roles: era la única vía que cambiaba el saldo
+            sin un documento detrás. Ahora el stock solo se mueve por compras,
+            ventas y traslados, que sí lo explican. La ruta de la API también se
+            cerró; dejar solo de quitar el botón no habría sido una regla. */}
       </div>
-
-      {abierto ? (
-        <FormularioMovimiento onCerrar={() => setAbierto(false)} onRegistrado={recargar} />
-      ) : null}
 
       {formulario ? (
         <FormularioExistencia

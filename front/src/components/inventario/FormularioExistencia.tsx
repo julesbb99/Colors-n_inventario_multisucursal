@@ -3,7 +3,7 @@ import { Modal } from '../ui/Modal';
 import { Boton } from '../ui/Boton';
 import { Alerta } from '../ui/Alerta';
 import { Spinner } from '../ui/Spinner';
-import { CampoNumero, CampoSelect } from '../ui/Campos';
+import { aNumero, aTexto, CampoNumero, CampoSelect } from '../ui/Campos';
 import { CampoSede } from '../ui/CampoSede';
 import { useSede } from '../../hooks/useSede';
 import { useCatalogos } from '../../hooks/useCatalogos';
@@ -66,16 +66,14 @@ export function FormularioExistencia({
   const [sucursalId, setSucursalId] = useState(
     existencia ? String(existencia.sucursalId) : inicial === null ? '' : String(inicial),
   );
-  const [stockMinimo, setStockMinimo] = useState(
-    existencia ? String(existencia.stockMinimo) : '0',
-  );
+  const [stockMinimo, setStockMinimo] = useState(existencia ? aTexto(existencia.stockMinimo) : '0');
   const [validacion, setValidacion] = useState<string | null>(null);
 
   function alGuardar() {
     setValidacion(null);
 
-    const minimo = Number(stockMinimo);
-    if (!Number.isFinite(minimo) || minimo < 0) {
+    const minimo = aNumero(stockMinimo);
+    if (minimo === null || minimo < 0) {
       setValidacion('El mínimo de reposición tiene que ser un número de cero en adelante.');
       return;
     }
@@ -160,7 +158,6 @@ export function FormularioExistencia({
           etiqueta="Mínimo de reposición"
           valor={stockMinimo}
           onCambio={setStockMinimo}
-          min={0}
           disabled={enviando}
           ayuda={
             'En la unidad base del producto. La alerta salta cuando el saldo baja de aquí; ' +

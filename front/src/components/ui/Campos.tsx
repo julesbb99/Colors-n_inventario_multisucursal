@@ -77,60 +77,52 @@ export function CampoTexto({
   );
 }
 
+/**
+ * Qué se admite al teclear en un campo numérico.
+ *
+ * Devuelve el texto YA NORMALIZADO, o `null` si lo escrito no vale y hay que
+ * ignorar la tecla.
+ *
+ * EL PUNTO SE ESCRIBE COMO COMA. El punto del teclado numérico es la tecla que
+ * busca quien digita rápido, y negársela sin más obligaría a bajar a la coma en
+ * mitad de una cifra. Como es sustitución de un carácter por otro, el cursor se
+ * queda donde estaba.
+ */
+function filtrarNumero(escrito: string, entero: boolean): string | null {
+  // Vacío se permite: hay que poder borrar para corregir.
+  if (escrito === '') {
+    return '';
+  }
+
+  if (entero) {
+    // Ni coma ni punto: días y unidades enteras no tienen parte decimal, y
+    // admitir el separador solo serviría para escribir algo que se redondearía
+    // después sin avisar.
+    return /^\d+$/.test(escrito) ? escrito : null;
+  }
+
+  // `replace` sin la bandera global cambia SOLO el primer punto: «1.2.3» queda
+  // «1,2.3», que no encaja con el patrón y por tanto se rechaza entero. Es lo
+  // que se quiere -son dos separadores- y sale gratis.
+  const normalizado = escrito.replace('.', ',');
+
+  // Dígitos, opcionalmente una coma, opcionalmente más dígitos. Una coma suelta
+  // («,») vale mientras se escribe «,5»; lo que no vale es una segunda coma, un
+  // signo, un espacio o una letra.
+  return /^\d*,?\d*$/.test(normalizado) ? normalizado : null;
+}
+
 interface CampoNumeroProps {
   etiqueta: string;
   /**
-   * El valor se maneja como CADENA, no como número.
+   * El valor TAL COMO SE VE, con COMA decimal: «12,5», no «12.5».
    *
-   * Con un `number` en el estado no se puede escribir "1." ni dejar el campo
-   * vacío mientras se corrige: React lo normalizaría a 1 o a 0 en cada tecla y
-   * el cursor saltaría. Se convierte al enviar, que es cuando importa.
-   */
-  valor: string;
-  onCambio: (valor: string) => void;
-  ayuda?: string;
-  requerido?: boolean;
-  min?: number;
-  step?: string;
-  disabled?: boolean;
-}
-
-export function CampoNumero({
-  etiqueta,
-  valor,
-  onCambio,
-  ayuda,
-  requerido,
-  min = 0,
-  step = 'any',
-  disabled,
-}: CampoNumeroProps) {
-  return (
-    <Envoltorio etiqueta={etiqueta} ayuda={ayuda} requerido={requerido}>
-      {(id) => (
-        <input
-          id={id}
-          type="number"
-          inputMode="decimal"
-          value={valor}
-          min={min}
-          step={step}
-          disabled={disabled}
-          onChange={(evento) => onCambio(evento.target.value)}
-          className={`${BASE_CONTROL} tabular-nums`}
-        />
-      )}
-    </Envoltorio>
-  );
-}
-
-interface CampoDecimalProps {
-  etiqueta: string;
-  /**
-   * El valor tal como se ve: con COMA decimal. «12,5», no «12.5».
+   * Es una CADENA y no un número a propósito: con un `number` en el estado no se
+   * podría escribir «1,» ni dejar el campo vacío mientras se corrige, porque
+   * React lo normalizaría a 1 o a 0 en cada tecla y el cursor saltaría.
    *
-   * Quien lo reciba debe pasarlo por {@link aNumero} antes de enviarlo: la API
-   * y `Number()` esperan punto.
+   * Para sembrarlo desde un número está {@link aTexto}, y para leerlo antes de
+   * enviar, {@link aNumero}. `Number('12,5')` es `NaN`, no 12,5.
    */
   valor: string;
   onCambio: (valor: string) => void;
@@ -138,10 +130,15 @@ interface CampoDecimalProps {
   requerido?: boolean;
   disabled?: boolean;
   placeholder?: string;
+  /** Sin parte decimal: días, unidades contadas. La coma deja de admitirse. */
+  entero?: boolean;
 }
 
 /**
- * Cantidad decimal, POSITIVA y con COMA.
+ * Cantidad, precio, porcentaje o conteo. POSITIVO y con COMA.
+ *
+ * ES EL ÚNICO CAMPO NUMÉRICO DE LA APLICACIÓN. Tener dos -uno filtrado y otro
+ * no- termina siempre igual: el formulario nuevo agarra el que no filtra.
  *
  * POR QUE NO ES UN `<input type="number">`. Ese acepta cosas que aquí no tienen
  * sentido y que además no se ven hasta que fallan: el signo menos, el más, y la
@@ -149,13 +146,19 @@ interface CampoDecimalProps {
  * separador decimal depende de la configuración del equipo, así que el mismo
  * formulario admite «12.5» en una máquina y lo rechaza en otra.
  *
- * Aquí se filtra al teclear: solo dígitos y UNA coma. Lo que no cumple no llega
- * a escribirse, en vez de escribirse y rechazarse al enviar.
+ * Aquí se filtra al teclear, con {@link filtrarNumero}: lo que no cumple no
+ * llega a escribirse, en vez de escribirse y rechazarse al enviar. Vale también
+ * para lo que se pega, porque pegar dispara el mismo `onChange` con el texto ya
+ * puesto.
  *
- * `inputMode="decimal"` hace que en un móvil salga el teclado numérico aunque el
- * campo sea de texto.
+ * COMO SE DESCARTA UNA TECLA. No se llama a `onCambio`, así que el estado no
+ * cambia; React, para un campo controlado, devuelve el DOM al valor de la
+ * propiedad aunque no haya vuelto a renderizar. El carácter no llega a verse.
+ *
+ * `inputMode` hace que en un móvil salga el teclado numérico aunque el campo sea
+ * de texto.
  */
-export function CampoDecimal({
+export function CampoNumero({
   etiqueta,
   valor,
   onCambio,
@@ -163,33 +166,24 @@ export function CampoDecimal({
   requerido,
   disabled,
   placeholder,
-}: CampoDecimalProps) {
+  entero = false,
+}: CampoNumeroProps) {
   return (
     <Envoltorio etiqueta={etiqueta} ayuda={ayuda} requerido={requerido}>
       {(id) => (
         <input
           id={id}
           type="text"
-          inputMode="decimal"
+          inputMode={entero ? 'numeric' : 'decimal'}
+          autoComplete="off"
           value={valor}
           disabled={disabled}
           placeholder={placeholder}
           onChange={(evento) => {
-            const escrito = evento.target.value;
-
-            // Vacío se permite: hay que poder borrar para corregir.
-            if (escrito === '') {
-              onCambio('');
-              return;
+            const filtrado = filtrarNumero(evento.target.value, entero);
+            if (filtrado !== null) {
+              onCambio(filtrado);
             }
-
-            // Dígitos, opcionalmente una coma, opcionalmente más dígitos. Una
-            // coma suelta («,») vale mientras se escribe «,5»; lo que no vale
-            // es una segunda coma, un signo o una letra.
-            if (/^\d*,?\d*$/.test(escrito)) {
-              onCambio(escrito);
-            }
-            // Si no encaja, se ignora la tecla y el valor se queda como estaba.
           }}
           className={`${BASE_CONTROL} tabular-nums`}
         />
@@ -199,7 +193,7 @@ export function CampoDecimal({
 }
 
 /**
- * Lo escrito en un {@link CampoDecimal}, como número.
+ * Lo escrito en un {@link CampoNumero}, como número.
  *
  * Devuelve `null` si está vacío o no es un número utilizable, que es lo que hay
  * que comprobar antes de enviar. La coma se cambia por punto porque `Number()`
@@ -213,6 +207,17 @@ export function aNumero(valor: string): number | null {
 
   const numero = Number(limpio);
   return Number.isFinite(numero) ? numero : null;
+}
+
+/**
+ * Un número, listo para sembrar un {@link CampoNumero}.
+ *
+ * `String(12.5)` daría «12.5», CON PUNTO, y ese texto ya no se podría corregir:
+ * al teclear encima, el filtro vería dos separadores y rechazaría la tecla. Lo
+ * que el campo muestra y lo que el campo admite tienen que ser lo mismo.
+ */
+export function aTexto(valor: number | null | undefined): string {
+  return valor === null || valor === undefined ? '' : String(valor).replace('.', ',');
 }
 
 export interface OpcionSelect {

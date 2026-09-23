@@ -14,6 +14,16 @@ public enum ErrorLote
     /// <summary>El numero de lote llego vacio o solo con espacios.</summary>
     NumeroLoteVacio,
 
+    /// <summary>
+    /// La correccion llego sin fecha de caducidad.
+    ///
+    /// Es obligatoria desde que todo lo que vende Colorsin caduca. Importa
+    /// cerrarlo tambien aqui y no solo en la recepcion: si no, bastaria con
+    /// crear el lote con fecha y borrarsela despues por este camino, y el lote
+    /// acabaria fuera de las alertas y al final de la cola FEFO.
+    /// </summary>
+    VencimientoRequerido,
+
     /// <summary>El producto no existe.</summary>
     ProductoNoEncontrado,
 

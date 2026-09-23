@@ -389,11 +389,12 @@ public sealed class ComprasService : IComprasService
             var saldoResultante = await IngresarAlSaldoAsync(
                 orden.SucursalId, detalle.ProductoId, cantidadBase, cancellationToken);
 
-            var (loteId, loteCreado) = string.IsNullOrWhiteSpace(entrega.NumeroLote)
-                ? (null, (bool?)null)
-                : await RegistrarLoteAsync(
-                    orden.SucursalId, detalle.ProductoId, cantidadBase,
-                    entrega.NumeroLote, entrega.FechaVencimiento, cancellationToken);
+            // Siempre hay lote: ResolverEntrega rechaza la entrega que no lo
+            // traiga, asi que aqui ya no queda el caso de "entra al saldo sin
+            // lote" que antes dejaba mercancia sin trazabilidad.
+            var (loteId, loteCreado) = await RegistrarLoteAsync(
+                orden.SucursalId, detalle.ProductoId, cantidadBase,
+                entrega.NumeroLote, entrega.FechaVencimiento, cancellationToken);
 
             var movimiento = new MovimientoInventario
             {
@@ -468,20 +469,26 @@ public sealed class ComprasService : IComprasService
         return ResultadoRecepcion.Ok(orden.Id, estadoNuevo, resultado);
     }
 
-    /// <summary>Una linea de la orden con lo que le llega en esta entrega.</summary>
+    /// <summary>
+    /// Una linea de la orden con lo que le llega en esta entrega.
+    ///
+    /// El lote y la caducidad NO son anulables: llegan validados desde
+    /// <see cref="ResolverEntrega"/>, y dejarlos anulables aqui obligaria a
+    /// volver a comprobarlos rio abajo, donde ya no hay a quien devolverle un
+    /// rechazo con sentido.
+    /// </summary>
     private sealed record EntregaLinea(
         OrdenCompraDetalle Detalle,
         decimal Cantidad,
-        string? NumeroLote,
-        DateOnly? FechaVencimiento);
+        string NumeroLote,
+        DateOnly FechaVencimiento);
 
     /// <summary>
     /// Cruza lo que pide la peticion con lo que falta en la orden y devuelve
     /// que lineas se reciben y por cuanto.
     ///
-    /// Sin lineas en la peticion se entiende "llego todo lo que faltaba", que es
-    /// el caso de la entrega completa. Con lineas, solo se reciben esas: las que
-    /// no aparezcan quedan pendientes.
+    /// Solo se reciben las lineas listadas: las que no aparezcan quedan
+    /// pendientes. Cada una tiene que traer su numero de lote y su caducidad.
     /// </summary>
     private static (List<EntregaLinea>? Entregas, ResultadoRecepcion? Rechazo) ResolverEntrega(
         OrdenCompra orden,
@@ -489,18 +496,17 @@ public sealed class ComprasService : IComprasService
     {
         var entregas = new List<EntregaLinea>();
 
+        // YA NO EXISTE EL ATAJO DE "LLEGO TODO". Una peticion sin lineas solia
+        // recibir la orden entera sin datos de lote; ahora el lote y la
+        // caducidad son obligatorios y ninguno de los dos se puede deducir de la
+        // orden: se leen de la etiqueta del envase al descargar.
         if (lineas.Count == 0)
         {
-            foreach (var detalle in orden.Detalles)
-            {
-                var pendiente = Pendiente(detalle);
-                if (pendiente > 0m)
-                {
-                    entregas.Add(new EntregaLinea(detalle, pendiente, null, null));
-                }
-            }
-
-            return (entregas, null);
+            return (null, ResultadoRecepcion.Fallo(
+                ErrorCompra.NumeroLoteRequerido,
+                "La entrega tiene que detallar sus lineas: cada una necesita el numero de " +
+                "lote y la fecha de caducidad del envase, y ninguno de los dos se puede " +
+                "deducir de la orden."));
         }
 
         var detallesPorId = orden.Detalles.ToDictionary(d => d.Id);
@@ -525,6 +531,28 @@ public sealed class ComprasService : IComprasService
                     $"{Num(detalle.CantidadRecibida)}."));
             }
 
+            // El lote y la caducidad se validan ANTES que la cantidad: los dos
+            // se leen de la misma etiqueta, y quien olvido uno probablemente no
+            // ha mirado el envase todavia. Decirselo antes de discutir cifras
+            // ahorra el viaje de ida y vuelta.
+            var numeroLote = linea.NumeroLote?.Trim();
+            if (string.IsNullOrEmpty(numeroLote))
+            {
+                return (null, ResultadoRecepcion.Fallo(
+                    ErrorCompra.NumeroLoteRequerido,
+                    $"Falta el numero de lote de '{detalle.Producto.Nombre}'. Es el que viene " +
+                    "impreso en el envase, y sin el la mercancia entraria sin trazabilidad."));
+            }
+
+            if (linea.FechaVencimiento is null)
+            {
+                return (null, ResultadoRecepcion.Fallo(
+                    ErrorCompra.FechaVencimientoRequerida,
+                    $"Falta la fecha de caducidad de '{detalle.Producto.Nombre}' " +
+                    $"(lote {numeroLote}). Es la que ordena la cola FEFO y dispara las " +
+                    "alertas de vencimiento."));
+            }
+
             // Sin cantidad explicita se entiende "todo lo que falta de esta
             // linea", que es lo que se quiere en la ultima entrega.
             var cantidad = linea.Cantidad ?? pendiente;
@@ -540,7 +568,7 @@ public sealed class ComprasService : IComprasService
             }
 
             entregas.Add(new EntregaLinea(
-                detalle, cantidad, linea.NumeroLote, linea.FechaVencimiento));
+                detalle, cantidad, numeroLote, linea.FechaVencimiento.Value));
         }
 
         return (entregas, null);
@@ -612,7 +640,7 @@ public sealed class ComprasService : IComprasService
         int productoId,
         decimal cantidadBase,
         string numeroLote,
-        DateOnly? fechaVencimiento,
+        DateOnly fechaVencimiento,
         CancellationToken cancellationToken)
     {
         var existente = await _inventario.ObtenerLotePorNumeroParaActualizarAsync(

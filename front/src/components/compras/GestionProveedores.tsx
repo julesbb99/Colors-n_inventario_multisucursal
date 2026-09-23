@@ -4,7 +4,7 @@ import { Modal } from '../ui/Modal';
 import { Boton } from '../ui/Boton';
 import { Alerta } from '../ui/Alerta';
 import { Spinner } from '../ui/Spinner';
-import { CampoNumero, CampoTexto } from '../ui/Campos';
+import { aNumero, aTexto, CampoNumero, CampoTexto } from '../ui/Campos';
 import { StatusBadge } from '../ui/StatusBadge';
 import { useCatalogos } from '../../hooks/useCatalogos';
 import { useConsulta } from '../../hooks/useConsulta';
@@ -312,7 +312,7 @@ function ListaPrecios({ proveedor, productos, onGuardado }: ListaPreciosProps) {
       }
       const mapa: Record<number, string> = {};
       for (const [id, precio] of filas) {
-        mapa[id] = precio === null ? '' : String(precio);
+        mapa[id] = aTexto(precio);
       }
       setValores(mapa);
     });
@@ -324,9 +324,10 @@ function ListaPrecios({ proveedor, productos, onGuardado }: ListaPreciosProps) {
 
   function guardar(productoId: number) {
     const texto = valores[productoId] ?? '';
-    const precio = texto.trim() === '' ? null : Number(texto);
+    // Vacío QUITA el producto de la lista; por eso el null no es un error.
+    const precio = aNumero(texto);
 
-    if (precio !== null && (!Number.isFinite(precio) || precio < 0)) {
+    if (texto.trim() !== '' && (precio === null || precio < 0)) {
       return;
     }
 
@@ -352,7 +353,6 @@ function ListaPrecios({ proveedor, productos, onGuardado }: ListaPreciosProps) {
               etiqueta="Precio de lista"
               valor={valores[producto.id] ?? ''}
               onCambio={(v) => setValores((previos) => ({ ...previos, [producto.id]: v }))}
-              min={0}
               disabled={enviando}
             />
           </div>

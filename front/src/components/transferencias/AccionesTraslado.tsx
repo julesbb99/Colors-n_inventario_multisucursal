@@ -4,7 +4,7 @@ import { Modal } from '../ui/Modal';
 import { Boton } from '../ui/Boton';
 import { Alerta } from '../ui/Alerta';
 import { Spinner } from '../ui/Spinner';
-import { aNumero, CampoArea, CampoDecimal, CampoSelect, CampoTexto } from '../ui/Campos';
+import { aNumero, aTexto, CampoArea, CampoNumero, CampoSelect, CampoTexto } from '../ui/Campos';
 import { useConsulta } from '../../hooks/useConsulta';
 import { useEnvio } from '../../hooks/useEnvio';
 import {
@@ -168,9 +168,7 @@ export function AccionesTraslado({
   const [fechaEstimada, setFechaEstimada] = useState('');
   // Arranca en lo pedido, con coma decimal: lo normal es despachar todo, y el
   // ajuste es la excepción. Vacío obligaría a teclearlo en cada despacho.
-  const [cantidadDespachada, setCantidadDespachada] = useState(
-    solicitada === null ? '' : String(solicitada).replace('.', ','),
-  );
+  const [cantidadDespachada, setCantidadDespachada] = useState(aTexto(solicitada));
   const [cantidadRecibida, setCantidadRecibida] = useState('');
   const [tratamientoFaltante, setTratamientoFaltante] = useState('');
   const [tipoNovedad, setTipoNovedad] = useState(String(TIPO_NOVEDAD.retraso));
@@ -484,7 +482,7 @@ export function AccionesTraslado({
               que se hace mirando el estante -«¿cuánto tengo?»- y pasa antes que
               llamar al transportador.
             */}
-            <CampoDecimal
+            <CampoNumero
               etiqueta={`Cantidad a despachar (${traslado.unidadSimbolo})`}
               valor={cantidadDespachada}
               onCambio={setCantidadDespachada}
@@ -552,12 +550,12 @@ export function AccionesTraslado({
 
         {accion === 'recepcion' ? (
           <>
-            <CampoDecimal
+            <CampoNumero
               etiqueta={`Cantidad recibida (${traslado.unidadSimbolo})`}
               valor={cantidadRecibida}
               onCambio={setCantidadRecibida}
               disabled={enviando}
-              placeholder={despachada === null ? '' : String(despachada).replace('.', ',')}
+              placeholder={aTexto(despachada)}
               ayuda={`Vacía recibe todo lo despachado (${formatearVolumen(despachada, traslado.unidadSimbolo)}). Cuenta antes de escribir: esta cifra es la que entra al saldo.`}
             />
 
@@ -635,11 +633,11 @@ export function AccionesTraslado({
             />
 
             {/*
-              Decimal con coma y sin signos: ver CampoDecimal. Un «-1» aquí no
+              Decimal con coma y sin signos: ver CampoNumero. Un «-1» aquí no
               significa nada, y con el campo numérico del navegador se podía
               escribir -y hasta «1e5»-.
             */}
-            <CampoDecimal
+            <CampoNumero
               etiqueta="Cantidad afectada"
               valor={cantidadAfectada}
               onCambio={setCantidadAfectada}

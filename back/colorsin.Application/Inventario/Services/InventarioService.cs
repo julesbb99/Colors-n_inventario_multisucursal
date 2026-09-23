@@ -502,6 +502,15 @@ public sealed class InventarioService : IInventarioService
                 "El numero de lote es obligatorio y no se puede dejar en blanco.");
         }
 
+        if (peticion.FechaVencimiento is null)
+        {
+            return ResultadoLote.Fallo(
+                ErrorLote.VencimientoRequerido,
+                "La fecha de caducidad es obligatoria. Se puede corregir, pero no borrar: " +
+                "un lote sin ella se saldria de las alertas de vencimiento y se iria al " +
+                "final de la cola FEFO.");
+        }
+
         var lote = await _lotes.ObtenerParaEditarAsync(id, cancellationToken);
         if (lote is null)
         {

@@ -290,10 +290,16 @@ function construirColumnas(
                     // BASE del producto, no en la del traslado. Un traslado de
                     // 5 galones mueve 18,93 litros de lote; rotularlo con
                     // `unidadSimbolo` diría «18,93 gal».
+                    // Decía «sin caducidad» cuando no había fecha. Ya no cabe:
+                    // todo lote tiene la suya, así que una fecha ausente aquí
+                    // solo puede significar que ese movimiento viajó SIN LOTE
+                    // -mercancía anterior a la trazabilidad-, y llamarlo «sin
+                    // caducidad» culpaba al producto de lo que es un hueco del
+                    // registro.
                     title={
                       `${formatearVolumen(l.cantidadBase, t.unidadBaseSimbolo)} de este lote` +
                       (l.fechaVencimiento === null
-                        ? ' · sin caducidad'
+                        ? ' · sin lote asignado, no hay caducidad que mostrar'
                         : ` · vence el ${formatearFechaSolo(l.fechaVencimiento)}`)
                     }
                     className={`inline-flex items-center whitespace-nowrap rounded px-1.5 py-0.5 font-mono text-[11px] ${

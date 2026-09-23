@@ -1,0 +1,31 @@
+# =============================================================================
+# Lo que NO entra en el contexto de construccion de la API.
+#
+# Importa por dos motivos. El obvio: `bin/` y `obj/` de Windows pesan cientos de
+# megas y se vuelven a generar dentro de la imagen igualmente. El que de verdad
+# importa: lo que entra al contexto puede acabar en la imagen, y la imagen se
+# publica en Docker Hub. Un `.env` colado aqui es una contrasena publicada.
+# =============================================================================
+
+# Compilacion local. Ademas de pesar, sus ensamblados son de OTRA plataforma:
+# copiarlos encima de los de Linux da errores dificiles de leer.
+**/bin/
+**/obj/
+
+# Secretos y configuracion de maquina.
+**/.env
+**/.env.*
+**/*.user
+
+# Editores y herramientas.
+**/.vs/
+**/.vscode/
+**/.idea/
+
+# Control de versiones.
+**/.git/
+**/.gitignore
+
+# Contenedores: el Dockerfile no necesita copiarse a si mismo.
+**/Dockerfile*
+**/.dockerignore

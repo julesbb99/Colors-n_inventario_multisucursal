@@ -3,7 +3,7 @@ import { AlertTriangle } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 import { Boton } from '../ui/Boton';
 import { Alerta } from '../ui/Alerta';
-import { CampoNumero } from '../ui/Campos';
+import { aNumero, aTexto, CampoNumero } from '../ui/Campos';
 import { useCatalogos } from '../../hooks/useCatalogos';
 import { useEnvio } from '../../hooks/useEnvio';
 import { fijarPrecioVenta, obtenerPrecioVenta } from '../../services/ventas';
@@ -65,7 +65,7 @@ export function ListaPreciosVenta({ onCerrar, onGuardado }: ListaPreciosVentaPro
         for (const fila of filas) {
           if (fila) {
             mapaDatos[fila[0]] = fila[1];
-            mapaValores[fila[0]] = fila[1].precioVenta === null ? '' : String(fila[1].precioVenta);
+            mapaValores[fila[0]] = aTexto(fila[1].precioVenta);
           }
         }
         setDatos(mapaDatos);
@@ -84,9 +84,10 @@ export function ListaPreciosVenta({ onCerrar, onGuardado }: ListaPreciosVentaPro
 
   function guardar(productoId: number) {
     const texto = valores[productoId] ?? '';
-    const precio = texto.trim() === '' ? null : Number(texto);
+    // Vacío QUITA el precio; por eso el null no es un error y sigue adelante.
+    const precio = aNumero(texto);
 
-    if (precio !== null && (!Number.isFinite(precio) || precio <= 0)) {
+    if (texto.trim() !== '' && (precio === null || precio <= 0)) {
       return;
     }
 
@@ -139,8 +140,8 @@ export function ListaPreciosVenta({ onCerrar, onGuardado }: ListaPreciosVentaPro
 
         {productos.map((producto) => {
           const dato = datos[producto.id];
-          const escrito = Number(valores[producto.id] ?? '');
-          const hayPrecio = Number.isFinite(escrito) && escrito > 0;
+          const escrito = aNumero(valores[producto.id] ?? '') ?? 0;
+          const hayPrecio = escrito > 0;
 
           const costo = dato?.costoPromedio ?? null;
           const bajoCosto = hayPrecio && costo !== null && escrito < costo;
@@ -178,7 +179,6 @@ export function ListaPreciosVenta({ onCerrar, onGuardado }: ListaPreciosVentaPro
                       setValores((previos) => ({ ...previos, [producto.id]: v }));
                       setGuardado(null);
                     }}
-                    min={0}
                     disabled={enviando}
                   />
                 </div>

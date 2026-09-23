@@ -4,7 +4,7 @@ import { Modal } from '../ui/Modal';
 import { Boton } from '../ui/Boton';
 import { Alerta } from '../ui/Alerta';
 import { CargandoPanel, Spinner } from '../ui/Spinner';
-import { CampoNumero, CampoSelect } from '../ui/Campos';
+import { aNumero, aTexto, CampoNumero, CampoSelect } from '../ui/Campos';
 import { CampoSede } from '../ui/CampoSede';
 import { useSede } from '../../hooks/useSede';
 import { useCatalogos } from '../../hooks/useCatalogos';
@@ -121,18 +121,18 @@ function FormularioOrdenInterno({
   const [sucursalId, setSucursalId] = useState(
     orden ? String(orden.sucursalId) : sedeActiva === null ? '' : String(sedeActiva),
   );
-  const [plazoPagoDias, setPlazoPagoDias] = useState(
-    orden?.plazoPagoDias == null ? '' : String(orden.plazoPagoDias),
-  );
+  const [plazoPagoDias, setPlazoPagoDias] = useState(aTexto(orden?.plazoPagoDias));
   const [lineas, setLineas] = useState<LineaBorrador[]>(
     orden && orden.detalles.length > 0
       ? orden.detalles.map((detalle, indice) => ({
           clave: indice,
           productoId: String(detalle.productoId),
-          cantidad: detalle.cantidad === null ? '' : String(detalle.cantidad),
+          cantidad: aTexto(detalle.cantidad),
           unidadId: String(detalle.unidadId),
-          precioUnitario: detalle.precioUnitario === null ? '' : String(detalle.precioUnitario),
-          descuento: detalle.descuento === 0 ? '' : String(detalle.descuento),
+          precioUnitario: aTexto(detalle.precioUnitario),
+          // El cero se muestra vacío: «sin descuento» se lee mejor en blanco que
+          // como un 0 que parece escrito a mano.
+          descuento: detalle.descuento === 0 ? '' : aTexto(detalle.descuento),
         }))
       : [lineaVacia(0)],
   );
@@ -155,10 +155,10 @@ function FormularioOrdenInterno({
   const totalEstimado = useMemo(
     () =>
       lineas.reduce((suma, linea) => {
-        const cantidad = Number(linea.cantidad);
-        const precio = Number(linea.precioUnitario);
-        const descuento = Number(linea.descuento) || 0;
-        if (!Number.isFinite(cantidad) || !Number.isFinite(precio)) {
+        const cantidad = aNumero(linea.cantidad);
+        const precio = aNumero(linea.precioUnitario);
+        const descuento = aNumero(linea.descuento) ?? 0;
+        if (cantidad === null || precio === null) {
           return suma;
         }
         return suma + cantidad * precio * (1 - descuento / 100);
@@ -184,8 +184,8 @@ function FormularioOrdenInterno({
         setValidacion('Cada línea necesita producto, cantidad y unidad.');
         return;
       }
-      const cantidad = Number(linea.cantidad);
-      if (!Number.isFinite(cantidad) || cantidad <= 0) {
+      const cantidad = aNumero(linea.cantidad);
+      if (cantidad === null || cantidad <= 0) {
         setValidacion('La cantidad de cada línea debe ser mayor que cero.');
         return;
       }
@@ -193,8 +193,10 @@ function FormularioOrdenInterno({
         productoId: Number(linea.productoId),
         cantidad,
         unidadId: Number(linea.unidadId),
-        precioUnitario: linea.precioUnitario === '' ? null : Number(linea.precioUnitario),
-        descuento: linea.descuento === '' ? 0 : Number(linea.descuento),
+        // `aNumero('')` ya devuelve null, que es lo que espera la API para
+        // «usa el precio de lista del proveedor».
+        precioUnitario: aNumero(linea.precioUnitario),
+        descuento: aNumero(linea.descuento) ?? 0,
       });
     }
 
@@ -206,7 +208,7 @@ function FormularioOrdenInterno({
     const cuerpo = {
       proveedorId: Number(proveedorId),
       sucursalId: Number(sucursalId),
-      plazoPagoDias: plazoPagoDias === '' ? null : Number(plazoPagoDias),
+      plazoPagoDias: aNumero(plazoPagoDias),
       lineas: lineasValidas,
     };
 
@@ -275,6 +277,7 @@ function FormularioOrdenInterno({
             etiqueta="Plazo de pago"
             valor={plazoPagoDias}
             onCambio={setPlazoPagoDias}
+            entero
             ayuda="Días. Opcional."
             disabled={enviando}
           />
@@ -376,7 +379,7 @@ function FormularioOrdenInterno({
             // Se redondea a peso: la orden se cotiza en pesos y un precio con
             // decimales arrastrados de la conversión no se puede escribir en
             // una factura.
-            actualizarLinea(clave, { precioUnitario: String(Math.round(precio)) })
+            actualizarLinea(clave, { precioUnitario: aTexto(Math.round(precio)) })
           }
         />
       </div>
