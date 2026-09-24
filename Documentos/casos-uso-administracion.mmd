@@ -1,0 +1,38 @@
+%% Casos de uso: Administracion y Tablero
+%% Fuente: back/colorsin.Api/Endpoints/ComunEndpoints.cs y DashboardEndpoints.cs
+%% "Comparar sedes" exige supervision mientras el resto del tablero no, porque
+%% es la unica consulta que cruza datos comerciales entre sucursales.
+flowchart LR
+    OP["Operador"]:::actor
+    GE["Gerente de Sucursal"]:::actor
+    GE -.->|hereda| OP
+
+    subgraph ADM["Administracion y Tablero"]
+        direction TB
+        D1(["Ver resumen general"])
+        D2(["Ver metricas de ventas"])
+        D3(["Ver historico de ventas"])
+        D4(["Ver rotacion de producto"])
+        D5(["Ver metricas de inventario"])
+        D6(["Ver metricas de traslados"])
+        D7(["Comparar sedes"]):::sup
+        A1(["Consultar sucursales y unidades"])
+        A2(["Consultar usuarios"]):::sup
+        A3(["Crear usuario"]):::sup
+        A4(["Retirar o habilitar usuario"]):::sup
+    end
+
+    OP --> D1
+    OP --> D2
+    OP --> D3
+    OP --> D4
+    OP --> D5
+    OP --> D6
+    OP --> A1
+    GE --> D7
+    GE --> A2
+    GE --> A3
+    GE --> A4
+
+    classDef actor fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px
+    classDef sup fill:#fff8e1,stroke:#f9a825,stroke-width:2px

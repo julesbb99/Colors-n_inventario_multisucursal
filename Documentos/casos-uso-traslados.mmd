@@ -1,0 +1,41 @@
+%% Casos de uso: modulo de Traslados entre sedes
+%% Fuente: back/colorsin.Api/Endpoints/TransferenciasEndpoints.cs
+%% Origen y destino son el MISMO rol -Operador- y se separan aqui porque el
+%% sistema si distingue la sede: quien despacha y quien recibe no pueden ser
+%% la misma. Administrar transportadoras es el unico caso del modulo que
+%% exige supervision.
+flowchart LR
+    ORI["Operador sede origen"]:::actor
+    DES["Operador sede destino"]:::actor
+    GE["Gerente de Sucursal"]:::actor
+    TRA["Transportadora"]:::ext
+
+    subgraph TRF["Modulo de Traslados"]
+        direction TB
+        T1(["Consultar traslados"])
+        T2(["Solicitar traslado"])
+        T3(["Despachar traslado"])
+        T4(["Recibir traslado"])
+        T5(["Rechazar traslado"])
+        T6(["Cancelar traslado"])
+        T7(["Registrar novedad"])
+        T8(["Cerrar novedad"])
+        T9(["Ver reporte de cumplimiento"])
+        X1(["Administrar transportadoras"]):::sup
+    end
+
+    ORI --> T1
+    ORI --> T2
+    ORI --> T3
+    ORI --> T6
+    DES --> T4
+    DES --> T5
+    DES --> T7
+    GE --> T8
+    GE --> T9
+    GE --> X1
+    TRA --- T3
+
+    classDef actor fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px
+    classDef sup fill:#fff8e1,stroke:#f9a825,stroke-width:2px
+    classDef ext fill:#eceff1,stroke:#546e7a,stroke-width:2px

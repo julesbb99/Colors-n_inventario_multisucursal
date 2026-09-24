@@ -1,0 +1,218 @@
+%% Diagrama entidad-relacion de colorsin_inventario
+%% Leido de information_schema el 2026-09-23: 18 tablas, 134 columnas, 36 claves foraneas.
+%% Cardinalidades segun la nulabilidad real de cada FK: || = NOT NULL, |o = admite nulo.
+%% Se excluye __EFMigrationsHistory, que es contabilidad de EF Core y no del negocio.
+erDiagram
+    sucursales   |o--o{ usuarios               : "adscribe a"
+    unidades_medida |o--o{ productos           : "es unidad base de"
+
+    sucursales   ||--o{ inventario_sucursal    : "tiene saldo de"
+    productos    ||--o{ inventario_sucursal    : "tiene saldo en"
+    sucursales   ||--o{ lotes                  : "almacena"
+    productos    ||--o{ lotes                  : "se lotea como"
+
+    sucursales   ||--o{ movimientos_inventario : "registra"
+    productos    ||--o{ movimientos_inventario : "se mueve en"
+    usuarios     ||--o{ movimientos_inventario : "ejecuta"
+    unidades_medida ||--o{ movimientos_inventario : "expresa"
+    lotes        |o--o{ movimientos_inventario : "afecta"
+    transferencias |o--o{ movimientos_inventario : "origina"
+
+    productos    ||--o{ producto_proveedor     : "se cotiza en"
+    proveedores  ||--o{ producto_proveedor     : "cotiza"
+    proveedores  ||--o{ ordenes_compra         : "surte"
+    sucursales   ||--o{ ordenes_compra         : "solicita"
+    usuarios     ||--o{ ordenes_compra         : "crea"
+    ordenes_compra ||--o{ orden_compra_detalle : "detalla"
+    productos    ||--o{ orden_compra_detalle   : "se pide como"
+    unidades_medida ||--o{ orden_compra_detalle : "expresa"
+
+    clientes     ||--o{ ventas                 : "compra en"
+    sucursales   ||--o{ ventas                 : "factura"
+    usuarios     ||--o{ ventas                 : "atiende"
+    ventas       ||--o{ venta_detalle          : "detalla"
+    productos    ||--o{ venta_detalle          : "se vende como"
+    unidades_medida ||--o{ venta_detalle       : "expresa"
+
+    productos    ||--o{ transferencias         : "se traslada"
+    sucursales   ||--o{ transferencias         : "despacha origen"
+    sucursales   ||--o{ transferencias         : "recibe destino"
+    transportadoras |o--o{ transferencias      : "transporta"
+    unidades_medida ||--o{ transferencias      : "expresa"
+    usuarios     ||--o{ transferencias         : "responde por"
+    transferencias ||--o{ novedades_transferencia : "presenta"
+    usuarios     ||--o{ novedades_transferencia : "reporta"
+    usuarios     |o--o{ novedades_transferencia : "cierra"
+
+    usuarios     ||--o{ auditoria_eventos      : "genera"
+
+    sucursales {
+        int id PK
+        varchar nombre
+        varchar ciudad
+        varchar direccion
+        enum rol_red "Matriz | Sucursal"
+        varchar descripcion
+    }
+    usuarios {
+        int id PK
+        varchar nombre
+        varchar email UK
+        varchar password_hash
+        enum rol "Administrador General | Gerente de Sucursal | Operador"
+        int sucursal_id FK "nullable, ON DELETE SET NULL"
+        boolean activo
+    }
+    unidades_medida {
+        int id PK
+        varchar nombre
+        varchar simbolo
+        decimal factor_conversion_litros
+    }
+    productos {
+        int id PK
+        varchar nombre
+        varchar categoria
+        text descripcion
+        int unidad_base_id FK "nullable"
+        decimal precio_venta
+    }
+    inventario_sucursal {
+        int id PK
+        int sucursal_id FK
+        int producto_id FK
+        decimal cantidad_base
+        decimal stock_minimo
+        decimal costo_promedio
+        boolean activo "baja logica"
+    }
+    lotes {
+        int id PK
+        int producto_id FK
+        int sucursal_id FK
+        varchar numero_lote
+        date fecha_vencimiento "obligatorio"
+        decimal cantidad_base
+        datetime fecha_ingreso
+    }
+    movimientos_inventario {
+        int id PK
+        int sucursal_id FK
+        int producto_id FK
+        int usuario_id FK
+        enum tipo "Ingreso | Retiro"
+        enum motivo "Compra | Venta | Ajuste | Transferencia | Merma | Devolucion"
+        decimal cantidad
+        int unidad_id FK
+        decimal cantidad_base
+        datetime fecha
+        int lote_id FK "nullable"
+        varchar observaciones
+        int transferencia_id FK "nullable"
+    }
+    proveedores {
+        int id PK
+        varchar nombre
+        varchar contacto
+        varchar telefono
+        boolean activo "baja logica"
+    }
+    producto_proveedor {
+        int id PK
+        int producto_id FK
+        int proveedor_id FK
+        decimal precio_referencia
+    }
+    ordenes_compra {
+        int id PK
+        int proveedor_id FK
+        int sucursal_id FK
+        datetime fecha
+        enum estado "Pendiente | Confirmada | ParcialmenteRecibida | Recibida | Cancelada"
+        int plazo_pago_dias
+        int usuario_id FK
+    }
+    orden_compra_detalle {
+        int id PK
+        int orden_compra_id FK "ON DELETE CASCADE"
+        int producto_id FK
+        decimal cantidad
+        int unidad_id FK
+        decimal precio_unitario
+        decimal descuento
+        decimal cantidad_recibida
+    }
+    clientes {
+        int id PK
+        varchar razon_social
+        enum tipo_persona "Natural | Juridica"
+        varchar documento UK
+        varchar telefono
+        varchar email
+        varchar direccion
+    }
+    ventas {
+        int id PK
+        int cliente_id FK
+        int sucursal_id FK
+        int usuario_id FK
+        datetime fecha
+        decimal total
+    }
+    venta_detalle {
+        int id PK
+        int venta_id FK "ON DELETE CASCADE"
+        int producto_id FK
+        decimal cantidad
+        int unidad_id FK
+        decimal precio_unitario
+        decimal descuento
+    }
+    transportadoras {
+        int id PK
+        varchar nombre
+        enum tipo_servicio "urgente | estandar"
+        tinyint dias_entrega
+        boolean activo
+    }
+    transferencias {
+        int id PK
+        int producto_id FK
+        int sucursal_origen_id FK
+        int sucursal_destino_id FK
+        int transportadora_id FK "nullable"
+        decimal cantidad_solicitada
+        decimal cantidad_despachada
+        decimal cantidad_recibida
+        int unidad_id FK
+        enum estado "Solicitada | EnTransito | Completada | RecibidaParcial | Cerrada | Rechazada | Cancelada"
+        enum urgencia "Baja | Media | Alta"
+        datetime fecha_solicitud
+        datetime fecha_despacho
+        datetime fecha_estimada_llegada
+        datetime fecha_recepcion
+        varchar guia
+        int usuario_id FK
+    }
+    novedades_transferencia {
+        int id PK
+        int transferencia_id FK "ON DELETE CASCADE"
+        int usuario_id FK "quien reporta"
+        enum tipo "Faltante | Averia | Sobrante | Retraso"
+        decimal cantidad_afectada
+        enum tratamiento "Ninguno | Reenvio | Reclamacion | Asumido"
+        enum estado "Abierta | Cerrada"
+        text motivo_cierre
+        datetime fecha_cierre
+        int usuario_cierre_id FK "nullable, quien cierra"
+        text observaciones
+        datetime fecha
+    }
+    auditoria_eventos {
+        bigint id PK
+        varchar modulo
+        varchar accion
+        int usuario_id FK
+        varchar detalle
+        datetime fecha
+    }

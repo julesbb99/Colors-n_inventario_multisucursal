@@ -1,0 +1,39 @@
+%% Casos de uso: modulo de Compras
+%% Fuente: back/colorsin.Api/Endpoints/ComprasEndpoints.cs
+%% "Registrar recepcion de mercancia" es el caso mas pesado del modulo: dentro
+%% de una sola transaccion actualiza orden_compra_detalle, recalcula el estado
+%% de la orden, crea o suma al lote, actualiza el saldo en inventario_sucursal
+%% y escribe en movimientos_inventario.
+flowchart LR
+    OP["Operador"]:::actor
+    AD["Administrador General"]:::actor
+    AD -.->|hereda| OP
+    PROV["Proveedor"]:::ext
+
+    subgraph COM["Modulo de Compras"]
+        direction TB
+        O1(["Consultar ordenes de compra"])
+        O2(["Crear orden de compra"])
+        O3(["Editar orden pendiente"])
+        O4(["Cancelar orden"])
+        O5(["Registrar recepcion de mercancia"])
+        P1(["Consultar proveedores y precios"])
+        P2(["Crear o editar proveedor"]):::adm
+        P3(["Retirar o reactivar proveedor"]):::adm
+        P4(["Fijar precio de referencia"]):::adm
+    end
+
+    OP --> O1
+    OP --> O2
+    OP --> O3
+    OP --> O4
+    OP --> O5
+    OP --> P1
+    AD --> P2
+    AD --> P3
+    AD --> P4
+    PROV --- O5
+
+    classDef actor fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px
+    classDef adm fill:#fdecea,stroke:#c62828,stroke-width:2px
+    classDef ext fill:#eceff1,stroke:#546e7a,stroke-width:2px

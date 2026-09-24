@@ -1,0 +1,40 @@
+%% Casos de uso: modulo de Inventario y lotes
+%% Fuente: back/colorsin.Api/Endpoints/InventarioEndpoints.cs
+%% OJO: este modulo NO tiene ningun caso de uso que mueva el saldo
+%% directamente. No hay endpoint para registrar un movimiento a mano ni para
+%% crear un lote suelto: el stock solo cambia a traves de una venta, una
+%% recepcion de compra o un traslado. Consecuencia practica: hoy no se puede
+%% registrar un ajuste ni una merma desde la aplicacion, aunque el enum
+%% movimientos_inventario.motivo contemple ambos valores.
+flowchart LR
+    OP["Operador"]:::actor
+    GE["Gerente de Sucursal"]:::actor
+    GE -.->|hereda| OP
+
+    subgraph INV["Modulo de Inventario"]
+        direction TB
+        C1(["Consultar catalogo de productos"])
+        C2(["Consultar existencias por sede"])
+        C3(["Consultar alertas de stock bajo"])
+        C4(["Consultar libro de movimientos"])
+        C5(["Consultar lotes en orden FEFO"])
+        C6(["Consultar lotes proximos a vencer"])
+        E1(["Crear existencia"]):::sup
+        E2(["Editar stock minimo"]):::sup
+        E3(["Dar de baja o reactivar existencia"]):::sup
+        E4(["Corregir numero y caducidad de lote"]):::sup
+    end
+
+    OP --> C1
+    OP --> C2
+    OP --> C3
+    OP --> C4
+    OP --> C5
+    OP --> C6
+    GE --> E1
+    GE --> E2
+    GE --> E3
+    GE --> E4
+
+    classDef actor fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px
+    classDef sup fill:#fff8e1,stroke:#f9a825,stroke-width:2px

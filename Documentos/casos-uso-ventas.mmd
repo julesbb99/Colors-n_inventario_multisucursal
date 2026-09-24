@@ -1,0 +1,38 @@
+%% Casos de uso: modulo de Ventas
+%% Fuente: back/colorsin.Api/Endpoints/VentasEndpoints.cs
+%% Separacion deliberada: quien vende puede dar de alta un cliente, pero no
+%% puede cambiar el precio de venta. Fijar precio exige Administrador General.
+%% "Registrar venta" descuenta el stock por FEFO dentro de una transaccion:
+%% escribe ventas, venta_detalle, inventario_sucursal, lotes y
+%% movimientos_inventario.
+flowchart LR
+    OP["Operador"]:::actor
+    AD["Administrador General"]:::actor
+    AD -.->|hereda| OP
+    CLI["Cliente"]:::ext
+
+    subgraph VEN["Modulo de Ventas"]
+        direction TB
+        V1(["Consultar ventas"])
+        V2(["Consultar detalle de venta"])
+        V3(["Registrar venta"])
+        V4(["Consultar clientes"])
+        V5(["Buscar cliente por documento"])
+        V6(["Registrar cliente"])
+        V7(["Consultar precio de venta"])
+        V8(["Fijar precio de venta"]):::adm
+    end
+
+    OP --> V1
+    OP --> V2
+    OP --> V3
+    OP --> V4
+    OP --> V5
+    OP --> V6
+    OP --> V7
+    AD --> V8
+    CLI --- V3
+
+    classDef actor fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px
+    classDef adm fill:#fdecea,stroke:#c62828,stroke-width:2px
+    classDef ext fill:#eceff1,stroke:#546e7a,stroke-width:2px

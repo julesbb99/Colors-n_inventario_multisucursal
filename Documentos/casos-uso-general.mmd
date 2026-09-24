@@ -1,0 +1,40 @@
+%% Casos de uso: vision general
+%% Derivado de back/colorsin.Api/Auth/PoliticasAutorizacion.cs y de los
+%% RequireAuthorization de cada endpoint, no de un diseno previo.
+%% Los tres roles forman una jerarquia estricta:
+%%   sin politica (solo autenticado) -> los tres roles
+%%   supervision                     -> AdminGeneral + GerenteSucursal
+%%   solo-admin-general              -> AdminGeneral
+%% Por eso cada caso se conecta SOLO al rol minimo que lo permite.
+%% Mermaid no tiene diagrama de casos de uso nativo: se emula con flowchart,
+%% subgraph como frontera del sistema y forma de estadio para los casos.
+flowchart LR
+    OP["Operador"]:::actor
+    GE["Gerente de Sucursal"]:::actor
+    AD["Administrador General"]:::actor
+
+    GE -.->|hereda| OP
+    AD -.->|hereda| GE
+
+    subgraph SIS["Sistema de Inventario Colorsin"]
+        direction TB
+        U1(["Consultar inventario y lotes"])
+        U2(["Registrar venta"])
+        U3(["Gestionar orden de compra"])
+        U4(["Operar traslado entre sedes"])
+        U5(["Consultar tablero"])
+        U6(["Administrar existencias y usuarios"]):::sup
+        U7(["Definir proveedores y precios"]):::adm
+    end
+
+    OP --> U1
+    OP --> U2
+    OP --> U3
+    OP --> U4
+    OP --> U5
+    GE --> U6
+    AD --> U7
+
+    classDef actor fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px
+    classDef sup fill:#fff8e1,stroke:#f9a825,stroke-width:2px
+    classDef adm fill:#fdecea,stroke:#c62828,stroke-width:2px
